@@ -1,0 +1,33 @@
+/* ============================================================
+   暖色主题：档案馆（纸感色板）
+   双通道语义色映射：馆藏蓝=语义向量 / 印章红=关键词
+   ============================================================ */
+[data-theme="warm"] {
+  color-scheme: light;
+  --bg:      #F4F3EE;   /* 冷纸白 */
+  --panel:   #FDFCF8;   /* 卡片白 */
+  --panel-2: #F1EFE7;   /* 更深纸色 */
+  --line:    #D9D5C8;   /* 纸纹描边 */
+  --text:    #23312F;   /* 墨青 */
+  --dim:     #7A8074;   /* 灰绿弱文本 */
+  --vec:     #33608C;   /* 语义向量通道 · 馆藏蓝 */
+  --bm25:    #B5432E;   /* BM25 关键词通道 · 印章红 */
+  --rrf:     #1A2624;   /* 融合结果 · 深墨 */
+  --ok:      #3E7A52;
+  --warn:    #B5432E;
+  --on-vec: #FDFCF8;
+  --selection: rgba(51,96,140,.18);
+  --row-hover: rgba(51,96,140,.05);
+  --line-row: rgba(35,49,47,.16);
+  --vec-half: rgba(51,96,140,.45);
+  --bm25-half: rgba(181,67,46,.4);
+  --vec-dim-bg: rgba(51,96,140,.08);
+  --vec-dim-border: rgba(51,96,140,.38);
+  --bm25-dim-bg: rgba(181,67,46,.08);
+  --bm25-dim-border: rgba(181,67,46,.38);
+  --ok-dim-border: rgba(62,122,82,.45);
+  --warn-dim-border: rgba(181,67,46,.45);
+  --ok-glow: rgba(62,122,82,.45);
+  --user-bubble-bg: #EBF1F7;
+  --user-bubble-border: #C7D7E6;
+}

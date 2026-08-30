@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>秒回喵 // 检索观测台</title>
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/theme-warm.css">
+<link rel="stylesheet" href="/static/css/console.css">
+<script>
+  /* 防闪烁：在样式渲染前先恢复上次选择的主题 */
+  try { if (localStorage.getItem('rc-theme') === 'warm') document.documentElement.dataset.theme = 'warm'; } catch (e) {}
+</script>
+</head>
+<body>
+
+<!-- 登录视图 -->
+<div class="login-view" id="loginView">
+  <div class="login-card">
+    <div class="lg">秒回喵 // 检索观测台</div>
+    <div class="sub">REPLY-CORE WEB 控制台 — 管理员登录</div>
+    <input type="password" id="tokenInput" placeholder="WEB_ADMIN_TOKEN" autocomplete="current-password">
+    <button id="loginBtn">进入控制台</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
+<div class="app">
+
+  <header>
+    <div class="brand"><b>秒回喵 //</b><span>REPLY-CORE 检索观测台</span></div>
+    <div class="head-right">
+      <div class="status">
+        <em><span class="dot ok" id="stDbDot"></span>db <b id="stDb">--</b></em>
+        <em><span class="dot ok" id="stVecDot"></span>vec <b id="stVec">--</b></em>
+        <em><span class="dot warn" id="stAiDot"></span>ai <b id="stAi">--</b></em>
+        <em><span class="dot warn" id="stQueueDot"></span>queue <b id="stQueue">--</b></em>
+      </div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" title="切换暖色档案馆主题"><span class="ic">◐</span><span id="themeLabel">档案馆模式</span></button>
+      <button id="logoutBtn" class="theme-toggle" type="button" title="退出登录">退出</button>
+    </div>
+  </header>
+
+  <nav>
+    <div class="nav-group">
+      <div class="nav-label">观测</div>
+      <div class="nav-item active"><span class="k">01</span> 检索测试台</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">知识库</div>
+      <div class="nav-item"><span class="k">02</span> 教程库</div>
+      <div class="nav-item"><span class="k">03</span> 社区设定</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">运行</div>
+      <div class="nav-item"><span class="k">04</span> 审核队列 <span class="nav-badge" id="navPending">0</span></div>
+    </div>
+  </nav>
+
+  <main>
+    <!-- 检索测试台：签名元素 = 双通道 → RRF 融合 -->
+    <section class="sec">
+      <div class="sec-head">
+        <div class="sec-title">检索测试台</div>
+        <div class="sec-sub" id="searchSub">pgvector HNSW ⇄ ParadeDB BM25 → RRF</div>
+      </div>
+      <div class="console">
+        <div class="query-row">
+          <span class="prompt-mark">&gt;_</span>
+          <input class="query-input" id="searchInput" placeholder="输入查询，观测双通道检索与 RRF 融合…">
+          <select class="scope-select" id="searchScope">
+            <option value="all">全库</option>
+            <option value="tutorials">教程库</option>
+            <option value="community_settings">社区设定</option>
+          </select>
+          <button class="btn-run" id="searchBtn">执行检索</button>
+        </div>
+        <div class="channels">
+          <div class="channel vec">
+            <h4>语义通道 · 向量近邻</h4>
+            <div class="hits" id="vecHits"><div class="channel-off">输入查询后执行检索</div></div>
+          </div>
+          <div class="channel bm25">
+            <h4>关键词通道 · BM25</h4>
+            <div class="hits" id="bm25Hits"><div class="channel-off">输入查询后执行检索</div></div>
+          </div>
+          <div class="fusion">
+            <h4>RRF 融合结果</h4>
+            <div class="fusion-body" id="fusionBody"><div class="fusion-empty">—</div></div>
+          </div>
+        </div>
+        <div class="search-results" id="searchResults"></div>
+      </div>
+    </section>
+
+    <!-- 健康统计 -->
+    <div class="vitals" id="vitals"></div>
+
+    <!-- 文档列表 -->
+    <section class="sec">
+      <div class="sec-head">
+        <div class="sec-title" id="docSecTitle">知识库 · 教程库</div>
+        <select class="scope-select" id="docSource">
+          <option value="tutorials">教程库</option>
+          <option value="community_settings">社区设定</option>
+        </select>
+      </div>
+      <table>
+        <thead>
+          <tr><th>编号</th><th>标题</th><th>分类</th><th>chunks</th><th>更新</th></tr>
+        </thead>
+        <tbody id="docTbody"><tr><td colspan="5" class="table-empty">加载中…</td></tr></tbody>
+      </table>
+    </section>
+
+    <!-- 审核队列 -->
+    <section class="sec">
+      <div class="sec-head">
+        <div class="sec-title">审核队列 · community_settings.pending_entries</div>
+        <div class="sec-sub">公开投票中 · 管理员可直接批准</div>
+      </div>
+      <div class="review-grid" id="reviewGrid"></div>
+    </section>
+  </main>
+
+  <!-- 问答演示抽屉 -->
+  <aside>
+    <div class="aside-head">问答演示 <span id="chatModelTag">tools: on</span></div>
+    <div class="chat" id="chatMsgs"></div>
+    <div class="chat-scope">
+      检索范围
+      <select id="chatScope">
+        <option value="all">全库</option>
+        <option value="tutorials">仅教程</option>
+        <option value="community_settings">仅设定</option>
+      </select>
+    </div>
+    <div class="chat-input">
+      <input id="chatInput" placeholder="以管理员身份提问，测试检索问答…">
+      <button id="chatSend">发送</button>
+    </div>
+  </aside>
+</div>
+
+<script src="/static/js/theme.js"></script>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

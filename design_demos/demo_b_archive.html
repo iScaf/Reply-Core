@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>秒回喵 · 知识档案馆 — Demo B</title>
+<style>
+  /* ============================================================
+     Demo B · 档案编目馆
+     隐喻：知识库 = 档案馆。文档是编目索引卡，审核队列是
+     待归档托盘，审核状态以馆藏印章呈现。
+     ============================================================ */
+  :root {
+    --paper:   #F4F3EE;   /* 冷纸白 */
+    --card:    #FDFCF8;   /* 卡片 */
+    --ink:     #23312F;   /* 墨青 */
+    --dim:     #7A8074;   /* 灰绿弱文本 */
+    --line:    #DAD6C9;   /* 纸纹描边 */
+    --line-2:  #C8C3B2;
+    --blue:    #33608C;   /* 馆藏蓝 */
+    --blue-bg: #EBF1F7;
+    --stamp-red:    #B5432E;  /* 待审印章 */
+    --stamp-green:  #3E7A52;  /* 收录印章 */
+    --serif: "Noto Serif SC","Source Han Serif SC","SimSun",Georgia,serif;
+    --sans:  "PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+    --mono:  "Courier New",Consolas,monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--paper); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.65; }
+  ::selection { background:rgba(51,96,140,.18); }
+  button { font-family:inherit; cursor:pointer; }
+  :focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+
+  .app { min-height:100vh; display:flex; flex-direction:column; }
+
+  /* ---------- 馆额横幅 ---------- */
+  .masthead { background:var(--card); border-bottom:2px solid var(--ink); }
+  .mast-inner { max-width:1240px; margin:0 auto; padding:26px 28px 20px; display:flex; align-items:flex-end; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+  .mast-title { font-family:var(--serif); font-size:30px; letter-spacing:6px; font-weight:700; }
+  .mast-title small { display:block; font-size:12px; letter-spacing:3px; color:var(--dim); font-weight:normal; margin-top:6px; font-family:var(--sans); }
+  .mast-cat { display:flex; gap:26px; font-size:12px; color:var(--dim); text-align:right; }
+  .mast-cat b { display:block; font-size:20px; color:var(--ink); font-family:var(--serif); font-weight:700; }
+
+  /* ---------- 编目台导航 ---------- */
+  .desk { background:var(--card); border-bottom:1px solid var(--line-2); }
+  .desk-inner { max-width:1240px; margin:0 auto; padding:0 28px; display:flex; gap:4px; align-items:flex-end; }
+  .tab { font-family:var(--serif); font-size:14px; letter-spacing:2px; padding:12px 22px 10px; color:var(--dim); border:1px solid transparent; border-bottom:none; border-radius:6px 6px 0 0; position:relative; top:1px; }
+  .tab:hover { color:var(--ink); }
+  .tab.on { background:var(--paper); border-color:var(--line-2); color:var(--ink); font-weight:700; }
+  .tab .cnt { font-family:var(--mono); font-size:11px; color:var(--dim); margin-left:6px; }
+  .tab.pend .cnt { color:var(--stamp-red); font-weight:bold; }
+  .desk-right { margin-left:auto; padding:10px 0; font-size:12px; color:var(--dim); }
+  .desk-right b { color:var(--stamp-green); font-weight:normal; }
+
+  /* ---------- 主体 ---------- */
+  .body { max-width:1240px; width:100%; margin:0 auto; padding:26px 28px 34px; display:grid; grid-template-columns: 1fr 330px; gap:26px; align-items:start; flex:1; }
+  .shelf { min-width:0; }
+
+  /* ---------- 索引卡（签名造型）---------- */
+  .cards { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
+  .icard { background:var(--card); border:1px solid var(--line-2); border-radius:2px; box-shadow:0 1px 0 rgba(35,49,47,.06), 0 6px 14px -10px rgba(35,49,47,.25); padding:18px 18px 14px; position:relative; }
+  /* 卡片顶耳 tab */
+  .icard::before { content:attr(data-tab); position:absolute; top:-11px; left:14px; background:var(--card); border:1px solid var(--line-2); border-bottom:none; border-radius:3px 3px 0 0; font-family:var(--mono); font-size:10px; letter-spacing:1px; color:var(--blue); padding:2px 9px 1px; }
+  /* 打卡孔 */
+  .icard::after { content:""; position:absolute; top:14px; right:14px; width:10px; height:10px; border:1px solid var(--line-2); border-radius:50%; background:var(--paper); box-shadow:inset 0 1px 1px rgba(35,49,47,.12); }
+  .icard h4 { font-family:var(--serif); font-size:17px; font-weight:700; margin:2px 26px 4px 0; line-height:1.45; }
+  .icard .cat { font-size:11px; color:var(--blue); letter-spacing:1px; margin-bottom:8px; }
+  .icard .abs { font-size:12.5px; color:#55605B; margin-bottom:10px; }
+  .cardno { font-family:var(--mono); font-size:10px; color:var(--dim); border-top:1px dashed var(--line-2); padding-top:8px; display:flex; justify-content:space-between; align-items:center; }
+  .cardno .meta { display:flex; gap:12px; }
+  .stampline { display:flex; align-items:center; gap:10px; margin-top:10px; }
+
+  /* 双通道热度：馆藏式「借阅热度」刻度 */
+  .gauge { flex:1; height:14px; border:1px solid var(--line-2); border-radius:2px; display:flex; overflow:hidden; background:
+    repeating-linear-gradient(90deg, transparent 0 9px, var(--paper) 9px 10px); }
+  .gauge i { display:block; height:100%; }
+  .gauge .gv { background:rgba(51,96,140,.55); }
+  .gauge .gb { background:rgba(181,67,46,.45); }
+  .gauge-cap { font-size:10px; color:var(--dim); font-family:var(--mono); white-space:nowrap; }
+
+  /* ---------- 印章（签名元素）---------- */
+  .stamp { font-family:var(--serif); font-size:13px; font-weight:700; letter-spacing:3px; border:2px solid; border-radius:50%; padding:4px 12px; transform:rotate(-6deg); display:inline-block; }
+  .stamp.red    { color:var(--stamp-red); border-color:var(--stamp-red); opacity:.82; }
+  .stamp.green  { color:var(--stamp-green); border-color:var(--stamp-green); opacity:.82; transform:rotate(-4deg); font-size:11px; letter-spacing:2px; }
+
+  /* ---------- 待归档托盘（右栏）---------- */
+  .tray { background:var(--card); border:1px solid var(--line-2); border-radius:2px; box-shadow:0 1px 0 rgba(35,49,47,.06); }
+  .tray-head { font-family:var(--serif); font-size:15px; font-weight:700; letter-spacing:2px; padding:14px 16px; border-bottom:2px solid var(--ink); display:flex; justify-content:space-between; align-items:baseline; }
+  .tray-head small { font-family:var(--sans); font-weight:normal; font-size:11px; color:var(--dim); letter-spacing:1px; }
+  .tray-item { padding:13px 16px; border-bottom:1px dashed var(--line-2); position:relative; }
+  .tray-item:last-child { border-bottom:none; }
+  .tray-item h5 { font-family:var(--serif); font-size:13.5px; font-weight:700; margin-bottom:3px; }
+  .tray-item p { font-size:11.5px; color:var(--dim); margin-bottom:8px; }
+  .tray-votes { font-family:var(--mono); font-size:11px; color:var(--dim); display:flex; justify-content:space-between; margin-bottom:9px; }
+  .tray-votes .yes { color:var(--stamp-green); } .tray-votes .no { color:var(--stamp-red); }
+  .tray-acts { display:flex; gap:8px; }
+  .abtn { font-size:12px; padding:4px 13px; border-radius:2px; border:1px solid var(--line-2); background:var(--card); color:var(--ink); }
+  .abtn:hover { border-color:var(--ink); }
+  .abtn.ok { color:var(--stamp-green); border-color:var(--stamp-green); }
+  .abtn.no { color:var(--stamp-red); border-color:rgba(181,67,46,.55); }
+
+  /* ---------- 咨询台（问答演示）---------- */
+  .counter { max-width:1240px; width:100%; margin:0 auto; padding:0 28px 40px; }
+  .counter-box { background:var(--card); border:1px solid var(--line-2); border-radius:2px; box-shadow:0 6px 18px -12px rgba(35,49,47,.3); }
+  .counter-head { display:flex; align-items:baseline; justify-content:space-between; padding:14px 20px; border-bottom:2px solid var(--ink); }
+  .counter-head h3 { font-family:var(--serif); font-size:17px; font-weight:700; letter-spacing:3px; }
+  .counter-head span { font-size:11px; color:var(--dim); letter-spacing:1px; font-family:var(--mono); }
+  .counter-body { display:grid; grid-template-columns:1fr 1fr; }
+  .q,.a { padding:18px 22px; }
+  .q { border-right:1px dashed var(--line-2); }
+  .role { font-family:var(--mono); font-size:10px; letter-spacing:2px; color:var(--dim); margin-bottom:8px; text-transform:uppercase; }
+  .q .role b { color:var(--blue); font-weight:normal; }
+  .a .role b { color:var(--stamp-green); font-weight:normal; }
+  .q p, .a p { font-size:13.5px; }
+  .a p { font-family:var(--serif); }
+  .ref { font-family:var(--mono); font-size:10.5px; color:var(--blue); border-bottom:1px dotted var(--blue); padding:0 1px; white-space:nowrap; }
+  .counter-foot { border-top:1px solid var(--line-2); padding:12px 20px; display:flex; gap:10px; }
+  .counter-foot input { flex:1; border:1px solid var(--line-2); background:var(--paper); border-radius:2px; font-family:var(--sans); font-size:13px; padding:9px 13px; color:var(--ink); }
+  .counter-foot input:focus { border-color:var(--blue); outline:none; }
+  .counter-foot button { background:var(--ink); color:var(--card); border:none; border-radius:2px; font-size:13px; letter-spacing:2px; padding:0 22px; }
+  .counter-foot button:hover { background:#31453F; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation:none!important; transition:none!important; } }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 馆额 -->
+  <div class="masthead">
+    <div class="mast-inner">
+      <div class="mast-title">秒回喵 · 知识档案馆
+        <small>REPLY-CORE 技术社区 — 知识库编目与借阅服务</small>
+      </div>
+      <div class="mast-cat">
+        <div><b>128</b>教程卷宗</div>
+        <div><b>342</b>社区设定</div>
+        <div><b>5,206</b>论坛存档</div>
+        <div><b>12,847</b>知识条目</div>
+        <div><b style="color:var(--stamp-red)">3</b>待归档</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 编目台 -->
+  <div class="desk">
+    <div class="desk-inner">
+      <div class="tab on">教程库<span class="cnt">128</span></div>
+      <div class="tab">社区设定<span class="cnt">342</span></div>
+      <div class="tab">论坛存档<span class="cnt">5,206</span></div>
+      <div class="tab pend">待归档托盘<span class="cnt">3</span></div>
+      <div class="desk-right">编目系统运行中 · <b>●</b> 检索服务正常</div>
+    </div>
+  </div>
+
+  <div class="body">
+    <!-- 书架：索引卡网格 -->
+    <div class="shelf">
+      <div class="cards">
+
+        <article class="icard" data-tab="TUTORIALS / 数据库">
+          <h4>pgvector HNSW 索引调优实战</h4>
+          <div class="cat">分类 · 数据库检索</div>
+          <p class="abs">围绕 m、ef_construction 与召回率的权衡展开，附三组对照实验数据与重建索引的停机窗口估算。</p>
+          <div class="stampline">
+            <div class="gauge"><i class="gv" style="width:46%"></i><i class="gb" style="width:38%"></i></div>
+            <span class="gauge-cap">热度 语义46·词38</span>
+          </div>
+          <div class="stampline"><span class="stamp green">已收录</span></div>
+          <div class="cardno"><div class="meta"><span>卡片 No.T-042</span><span>24 条目</span><span>maxinlong 编</span></div><span>2 小时前修订</span></div>
+        </article>
+
+        <article class="icard" data-tab="TUTORIALS / 数据库">
+          <h4>ParadeDB BM25 中文分词指南</h4>
+          <div class="cat">分类 · 数据库检索</div>
+          <p class="abs">pdb.chinese_compatible 解析器实测：分词粒度、停用词与同义词典配置，附与默认解析器的召回对比。</p>
+          <div class="stampline">
+            <div class="gauge"><i class="gv" style="width:31%"></i><i class="gb" style="width:57%"></i></div>
+            <span class="gauge-cap">热度 语义31·词57</span>
+          </div>
+          <div class="stampline"><span class="stamp green">已收录</span></div>
+          <div class="cardno"><div class="meta"><span>卡片 No.T-041</span><span>18 条目</span><span>kaede 编</span></div><span>6 小时前修订</span></div>
+        </article>
+
+        <article class="icard" data-tab="TUTORIALS / discord.py">
+          <h4>discord.py 斜杠命令同步机制</h4>
+          <div class="cat">分类 · Bot 开发</div>
+          <p class="abs">GUILD_ID 指定后命令即时同步到开发服务器的原理，与全局同步最长一小时的差异，以及何时该用哪条路径。</p>
+          <div class="stampline">
+            <div class="gauge"><i class="gv" style="width:22%"></i><i class="gb" style="width:18%"></i></div>
+            <span class="gauge-cap">热度 语义22·词18</span>
+          </div>
+          <div class="stampline"><span class="stamp green">已收录</span></div>
+          <div class="cardno"><div class="meta"><span>卡片 No.T-039</span><span>12 条目</span><span>yuki 编</span></div><span>昨日修订</span></div>
+        </article>
+
+        <article class="icard" data-tab="TUTORIALS / 待编目" style="background:linear-gradient(180deg,#FDFCF8 0%,#FBF6F2 100%);">
+          <h4>SQLAlchemy 异步会话与行级锁</h4>
+          <div class="cat">分类 · 数据库检索</div>
+          <p class="abs">with_for_update 在个人记忆并发写入中的应用。向量条目生成中，暂不参与借阅检索。</p>
+          <div class="stampline">
+            <div class="gauge"><i class="gv" style="width:0%"></i><i class="gb" style="width:0%"></i></div>
+            <span class="gauge-cap">热度 —</span>
+          </div>
+          <div class="stampline"><span class="stamp red">编目中</span></div>
+          <div class="cardno"><div class="meta"><span>卡片 No.T-043</span><span>14 条目</span><span>maxinlong 编</span></div><span>向量生成 60%</span></div>
+        </article>
+
+      </div>
+    </div>
+
+    <!-- 待归档托盘 -->
+    <aside class="tray">
+      <div class="tray-head">待归档托盘 <small>community pending · 3 件</small></div>
+
+      <div class="tray-item">
+        <h5>新增设定：向量检索问答规范</h5>
+        <p>maxinlong 提案 · 今日 14:20</p>
+        <div class="tray-votes"><span class="yes">赞成 3</span><span class="no">反对 1</span><span>余 6 小时</span></div>
+        <div class="tray-acts"><button class="abtn ok">盖「收录」章</button><button class="abtn no">驳回</button><button class="abtn">阅卷</button></div>
+      </div>
+
+      <div class="tray-item">
+        <h5>修订：秒回喵性格设定 v3 → v4</h5>
+        <p>kaede 提案 · 今日 12:05</p>
+        <div class="tray-votes"><span class="yes">赞成 5</span><span class="no">反对 0</span><span>余 9 小时</span></div>
+        <div class="tray-acts"><button class="abtn ok">盖「收录」章</button><button class="abtn no">驳回</button><button class="abtn">阅卷</button></div>
+      </div>
+
+      <div class="tray-item">
+        <h5>新增设定：Bot 冷却策略说明</h5>
+        <p>yuki 提案 · 今日 09:47</p>
+        <div class="tray-votes"><span class="yes">赞成 1</span><span class="no">反对 2</span><span>余 2 小时</span></div>
+        <div class="tray-acts"><button class="abtn ok">盖「收录」章</button><button class="abtn no">驳回</button><button class="abtn">阅卷</button></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 咨询台：问答演示 -->
+  <div class="counter">
+    <div class="counter-box">
+      <div class="counter-head">
+        <h3>借阅咨询台</h3>
+        <span>检索范围：全馆 · 引用卷宗编号回复</span>
+      </div>
+      <div class="counter-body">
+        <div class="q">
+          <div class="role">读者 · <b>maxinlong</b></div>
+          <p>HNSW 的 ef_search 设多少比较合适？召回一直上不去。</p>
+        </div>
+        <div class="a">
+          <div class="role">馆员 · <b>秒回喵</b></div>
+          <p>先确认建索引时的 m 与 ef_construction——它们决定召回上限，运行时的 ef_search 只能在上限内调整。<span class="ref">见 T-042 §2</span>。距离在 0.24 左右说明向量质量正常，建议 ef_search 从 64 起步，不达标翻倍至 128，同时观察延迟。<span class="ref">见 T-042 §4</span></p>
+        </div>
+      </div>
+      <div class="counter-foot">
+        <input placeholder="向馆员提问…（回答将引用卷宗编号）">
+        <button>递 单</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

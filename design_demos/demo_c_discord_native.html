@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>秒回喵 · 问答演示室 — Demo C</title>
+<style>
+  /* ============================================================
+     Demo C · 聊天原生
+     隐喻：管理端 = 秒回喵的另一个聊天窗口。问答演示是主舞台，
+     Discord 消息流 + embed 式来源卡片；知识库管理退居侧栏。
+     ============================================================ */
+  :root {
+    --bg:      #1E1F22;   /* Discord 深炭 */
+    --panel:   #2B2D31;   /* 面板 */
+    --panel-2: #313338;   /* 聊天区 */
+    --line:    #3F4147;
+    --text:    #DBDEE1;
+    --dim:     #949BA4;
+    --blurple: #5865F2;
+    --green:   #23A55A;
+    --red:     #F23F43;
+    --gold:    #F0B232;
+    --sans: "PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+    --mono: Consolas,"Courier New",monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { color-scheme: dark; }
+  body { background:var(--bg); color:var(--text); font-family:var(--sans); font-size:15px; line-height:1.55; }
+  ::selection { background:rgba(88,101,242,.4); }
+  button { font-family:inherit; cursor:pointer; }
+  :focus-visible { outline:2px solid var(--blurple); outline-offset:2px; }
+
+  .app { display:grid; grid-template-columns: 72px 240px minmax(0,1fr) 340px; height:100vh; min-width:1180px; }
+
+  /* ---------- 服务器栏（最左） ---------- */
+  .rail { background:#1B1C1F; display:flex; flex-direction:column; align-items:center; padding:12px 0; gap:8px; }
+  .pill { width:48px; height:48px; border-radius:16px; display:grid; place-items:center; background:var(--panel); color:var(--text); font-size:17px; transition:border-radius .15s, background .15s; position:relative; }
+  .pill:hover { border-radius:14px; background:var(--blurple); }
+  .pill.home { background:var(--blurple); color:#fff; font-weight:700; font-size:15px; }
+  .pill.active { border-radius:14px; }
+  .pill.active::before { content:""; position:absolute; left:-12px; width:4px; height:28px; background:#fff; border-radius:0 4px 4px 0; }
+  .rail-sep { width:32px; height:2px; background:var(--line); border-radius:1px; margin:2px 0; }
+
+  /* ---------- 频道栏 ---------- */
+  .sidebar { background:var(--panel); display:flex; flex-direction:column; }
+  .guild-head { padding:14px 16px; font-weight:700; font-size:15px; border-bottom:1px solid rgba(0,0,0,.25); box-shadow:0 1px 0 rgba(0,0,0,.12); display:flex; justify-content:space-between; align-items:center; }
+  .guild-head span { color:var(--dim); font-weight:normal; }
+  .cat { padding:18px 8px 4px 16px; font-size:11px; font-weight:700; letter-spacing:.6px; color:var(--dim); text-transform:uppercase; display:flex; justify-content:space-between; align-items:center; }
+  .cat b { font-size:15px; font-weight:normal; }
+  .chan { display:flex; align-items:center; gap:8px; margin:0 8px; padding:6px 8px; border-radius:4px; color:var(--dim); font-size:14.5px; }
+  .chan:hover { background:rgba(255,255,255,.04); color:var(--text); }
+  .chan.active { background:rgba(255,255,255,.08); color:#fff; }
+  .chan .hash { color:var(--dim); font-size:16px; }
+  .chan.active .hash { color:#fff; }
+  .chan .n { margin-left:auto; background:var(--red); color:#fff; font-size:11px; font-weight:700; border-radius:8px; padding:0 6px; }
+  .user-bar { margin-top:auto; background:#232428; display:flex; align-items:center; gap:8px; padding:10px 12px; }
+  .avatar { width:32px; height:32px; border-radius:50%; background:linear-gradient(135deg,#5865F2,#404EED); display:grid; place-items:center; font-size:13px; font-weight:700; color:#fff; flex-shrink:0; }
+  .avatar.bot { background:linear-gradient(135deg,#23A55A,#1F8A4B); }
+  .avatar.bot::after { content:none; }
+  .user-bar .nm { font-size:13px; font-weight:600; line-height:1.2; }
+  .user-bar .st { font-size:11px; color:var(--dim); }
+  .bot-tag { display:inline-block; background:var(--blurple); color:#fff; font-size:9px; font-weight:700; border-radius:3px; padding:0 4px; margin-left:4px; vertical-align:1px; }
+
+  /* ---------- 主舞台：问答演示 ---------- */
+  .stage { display:flex; flex-direction:column; background:var(--panel-2); min-width:0; }
+  .stage-head { display:flex; align-items:center; gap:10px; padding:12px 16px; border-bottom:1px solid rgba(0,0,0,.25); box-shadow:0 1px 0 rgba(0,0,0,.1); }
+  .stage-head .hash { color:var(--dim); font-size:20px; }
+  .stage-head b { font-size:15.5px; }
+  .stage-head p { font-size:12.5px; color:var(--dim); margin-left:10px; border-left:1px solid var(--line); padding-left:10px; }
+  .stage-head .live { margin-left:auto; font-size:12px; color:var(--dim); display:flex; align-items:center; gap:6px; }
+  .live i { width:8px; height:8px; border-radius:50%; background:var(--green); display:inline-block; }
+
+  .msgs { flex:1; overflow-y:auto; padding:22px 0 10px; }
+  .day-sep { display:flex; align-items:center; gap:10px; margin:0 16px 16px; color:var(--dim); font-size:11.5px; }
+  .day-sep::before, .day-sep::after { content:""; flex:1; height:1px; background:var(--line); }
+
+  .msg { display:flex; gap:14px; padding:3px 48px 3px 16px; }
+  .msg:hover { background:rgba(255,255,255,.015); }
+  .msg + .msg { margin-top:2px; }
+  .msg .avatar { width:40px; height:40px; margin-top:2px; }
+  .msg-head { display:flex; align-items:baseline; gap:8px; margin-bottom:2px; }
+  .msg-head .nm { font-weight:600; font-size:15px; }
+  .msg-head .time { font-size:11px; color:var(--dim); }
+  .msg-body { font-size:15px; color:#DBDEE1; max-width:760px; }
+  .msg.user .msg-body { white-space:pre-wrap; }
+
+  /* embed 式来源卡 —— 签名元素 */
+  .embed-row { display:flex; gap:10px; margin-top:8px; max-width:720px; }
+  .embed { background:#2B2D31; border:1px solid var(--line); border-left:4px solid var(--blurple); border-radius:6px; padding:10px 12px; flex:1; min-width:0; }
+  .embed.tut { border-left-color:var(--blurple); }
+  .embed.set { border-left-color:var(--green); }
+  .embed .e-kind { font-size:10.5px; letter-spacing:.5px; color:var(--dim); margin-bottom:3px; }
+  .embed .e-title { font-size:13.5px; font-weight:600; color:#00A8FC; margin-bottom:4px; }
+  .embed .e-abs { font-size:12.5px; color:#B5BAC1; margin-bottom:6px; }
+  .embed .e-foot { font-size:11px; color:var(--dim); display:flex; gap:10px; font-family:var(--mono); }
+  .score-chip { font-family:var(--mono); font-size:10px; color:var(--dim); background:rgba(255,255,255,.05); border-radius:3px; padding:0 5px; }
+
+  .tools-note { margin-top:8px; font-size:11.5px; color:var(--dim); font-family:var(--mono); display:flex; align-items:center; gap:6px; }
+  .tools-note b { color:#57F287; font-weight:normal; }
+
+  /* 输入区 */
+  .input-zone { padding:0 16px 20px; }
+  .input-box { background:#383A40; border-radius:8px; display:flex; align-items:center; padding:11px 16px; gap:12px; }
+  .input-box .plus { color:#B5BAC1; font-size:20px; }
+  .input-box input { flex:1; background:transparent; border:none; color:var(--text); font-family:var(--sans); font-size:15px; }
+  .input-box input:focus { outline:none; }
+  .input-box input::placeholder { color:#6D6F78; }
+  .hint-row { margin-top:8px; display:flex; gap:8px; align-items:center; font-size:12px; color:var(--dim); }
+  .hint-chip { border:1px solid var(--line); border-radius:12px; padding:2px 10px; font-size:12px; color:var(--dim); background:var(--panel-2); }
+  .hint-chip:hover { color:var(--text); border-color:var(--dim); }
+
+  /* ---------- 右侧：知识库面板（内嵌在同一栏内的抽屉） ---------- */
+  .drawer { background:var(--panel); border-left:1px solid rgba(0,0,0,.3); display:flex; flex-direction:column; min-width:0; }
+  .drawer-tabs { display:flex; border-bottom:1px solid rgba(0,0,0,.25); }
+  .dtab { flex:1; text-align:center; padding:12px 4px; font-size:13px; font-weight:600; color:var(--dim); border-bottom:2px solid transparent; }
+  .dtab:hover { color:var(--text); }
+  .dtab.on { color:#fff; border-bottom-color:var(--blurple); }
+  .dtab .n { font-size:10.5px; background:var(--red); color:#fff; border-radius:8px; padding:0 5px; margin-left:4px; vertical-align:2px; }
+  .drawer-body { flex:1; overflow-y:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+
+  .k-card { background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:11px 13px; }
+  .k-card .k-kind { font-size:10.5px; color:var(--dim); letter-spacing:.5px; margin-bottom:4px; display:flex; justify-content:space-between; }
+  .k-card h5 { font-size:13.5px; font-weight:600; margin-bottom:4px; }
+  .k-card p { font-size:12px; color:#B5BAC1; margin-bottom:8px; }
+  .k-foot { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--dim); font-family:var(--mono); }
+  .dot-ok { width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block; }
+  .dot-sync { width:7px; height:7px; border-radius:50%; background:var(--gold); display:inline-block; }
+  .k-acts { margin-left:auto; display:flex; gap:6px; }
+  .kbtn { font-size:11px; border:1px solid var(--line); background:transparent; color:var(--dim); border-radius:4px; padding:2px 8px; }
+  .kbtn:hover { color:var(--text); border-color:var(--dim); }
+  .kbtn.pri { color:#fff; background:var(--blurple); border-color:var(--blurple); }
+
+  .stat-row { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:2px; }
+  .stat { background:var(--panel-2); border:1px solid var(--line); border-radius:8px; padding:9px 10px; }
+  .stat b { font-size:16px; display:block; }
+  .stat span { font-size:10.5px; color:var(--dim); }
+
+  @media (prefers-reduced-motion: reduce) { * { animation:none!important; transition:none!important; } }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 服务器栏 -->
+  <nav class="rail">
+    <div class="pill home">秒</div>
+    <div class="rail-sep"></div>
+    <div class="pill active" title="问答演示室">💬</div>
+    <div class="pill" title="知识库">📚</div>
+    <div class="pill" title="审核">🛡️</div>
+    <div class="pill" title="统计">📊</div>
+    <div class="rail-sep"></div>
+    <div class="pill" title="设置">⚙️</div>
+  </nav>
+
+  <!-- 频道栏 -->
+  <aside class="sidebar">
+    <div class="guild-head">Reply-Core <span>▾</span></div>
+    <div class="cat">演示 <b>＋</b></div>
+    <div class="chan active"><span class="hash">#</span> 问答演示室</div>
+    <div class="cat">知识库 <b>＋</b></div>
+    <div class="chan"><span class="hash">#</span> 教程库</div>
+    <div class="chan"><span class="hash">#</span> 社区设定</div>
+    <div class="chan"><span class="hash">#</span> 论坛帖索引</div>
+    <div class="cat">管理</div>
+    <div class="chan"><span class="hash">#</span> 审核队列 <span class="n">3</span></div>
+    <div class="chan"><span class="hash">#</span> Provider 配置</div>
+    <div class="chan"><span class="hash">#</span> Token 用量</div>
+    <div class="user-bar">
+      <div class="avatar">M</div>
+      <div><div class="nm">maxinlong</div><div class="st">开发者</div></div>
+    </div>
+  </aside>
+
+  <!-- 主舞台 -->
+  <main class="stage">
+    <div class="stage-head">
+      <span class="hash">#</span><b>问答演示室</b>
+      <p>模拟 Discord 对话测试检索效果 — 演示用，不影响真实频道</p>
+      <span class="live"><i></i> bot 在线</span>
+    </div>
+
+    <div class="msgs">
+      <div class="day-sep">今天 · 8 月 30 日</div>
+
+      <div class="msg user">
+        <div class="avatar">M</div>
+        <div>
+          <div class="msg-head"><span class="nm">maxinlong</span><span class="time">今天 14:02</span></div>
+          <div class="msg-body">HNSW 的 ef_search 设多少比较合适？召回一直上不去。</div>
+        </div>
+      </div>
+
+      <div class="msg bot" style="margin-top:14px">
+        <div class="avatar bot">秒</div>
+        <div>
+          <div class="msg-head"><span class="nm">秒回喵<span class="bot-tag">APP</span></span><span class="time">今天 14:02</span></div>
+          <div class="msg-body">
+            先确认两件事：<br>
+            ① 建索引时的 <b>m</b> 和 <b>ef_construction</b> 决定召回上限，运行时的 <b>ef_search</b> 只能在这个上限内调整；<br>
+            ② 你的 halfvec_cosine 距离在 0.24 左右，向量质量正常，问题多半出在 ef_search 偏小。
+            <br><br>建议从 <b>64</b> 起步：召回不达标就翻倍到 128，同时观察 p95 延迟，超过 50ms 再考虑重建索引而不是继续加大。
+          </div>
+
+          <div class="embed-row">
+            <div class="embed tut">
+              <div class="e-kind">📚 教程 · 数据库</div>
+              <div class="e-title">pgvector HNSW 索引调优实战</div>
+              <div class="e-abs">§2 m / ef_construction 与召回上限 · §4 ef_search 起步值与延迟权衡</div>
+              <div class="e-foot"><span>卡片 T-042</span><span class="score-chip">vec 0.183</span><span class="score-chip">bm25 8.42</span><span>RRF #1</span></div>
+            </div>
+            <div class="embed tut">
+              <div class="e-kind">📚 教程 · 检索</div>
+              <div class="e-title">RRF 融合排序原理与 k 值选择</div>
+              <div class="e-abs">为什么 k=60 是经验默认，何时该调</div>
+              <div class="e-foot"><span>卡片 T-037</span><span class="score-chip">vec 0.241</span><span>RRF #3</span></div>
+            </div>
+          </div>
+
+          <div class="tools-note">⚙ 调用工具 <b>search</b>(scope=tutorials) → HNSW×3 + BM25×2 → RRF 合并 · 412ms</div>
+        </div>
+      </div>
+
+      <div class="msg user" style="margin-top:14px">
+        <div class="avatar">M</div>
+        <div>
+          <div class="msg-head"><span class="nm">maxinlong</span><span class="time">今天 14:04</span></div>
+          <div class="msg-body">那 ef_construction 呢？rebuild 的代价大吗？</div>
+        </div>
+      </div>
+
+      <div class="msg bot" style="margin-top:14px">
+        <div class="avatar bot">秒</div>
+        <div>
+          <div class="msg-head"><span class="nm">秒回喵<span class="bot-tag">APP</span></span><span class="time">今天 14:04</span></div>
+          <div class="msg-body">正在检索知识库…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-zone">
+      <div class="input-box">
+        <span class="plus">＋</span>
+        <input placeholder="以用户身份向 秒回喵 提问">
+      </div>
+      <div class="hint-row">
+        模拟身份 <span class="hint-chip">maxinlong（含个人记忆）</span>
+        <span class="hint-chip">匿名新用户</span>
+        检索范围 <span class="hint-chip">全库</span><span class="hint-chip">仅教程</span><span class="hint-chip">仅设定</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- 知识库抽屉 -->
+  <aside class="drawer">
+    <div class="drawer-tabs">
+      <div class="dtab on">知识库</div>
+      <div class="dtab">审核 <span class="n">3</span></div>
+      <div class="dtab">统计</div>
+    </div>
+    <div class="drawer-body">
+      <div class="stat-row">
+        <div class="stat"><b>128</b><span>教程文档</span></div>
+        <div class="stat"><b>342</b><span>社区设定</span></div>
+        <div class="stat"><b>12.8k</b><span>向量块</span></div>
+      </div>
+
+      <div class="k-card">
+        <div class="k-kind"><span>📚 教程 · 数据库</span><span>2h 前</span></div>
+        <h5>pgvector HNSW 索引调优实战</h5>
+        <p>m, ef_construction 与召回率的权衡，附三组对照实验。</p>
+        <div class="k-foot"><span class="dot-ok"></span>24 块已索引
+          <div class="k-acts"><button class="kbtn">编辑</button><button class="kbtn pri">重建向量</button></div>
+        </div>
+      </div>
+
+      <div class="k-card">
+        <div class="k-kind"><span>📚 教程 · 数据库</span><span>6h 前</span></div>
+        <h5>ParadeDB BM25 中文分词指南</h5>
+        <p>pdb.chinese_compatible 解析器实测与同义词典配置。</p>
+        <div class="k-foot"><span class="dot-ok"></span>18 块已索引
+          <div class="k-acts"><button class="kbtn">编辑</button><button class="kbtn pri">重建向量</button></div>
+        </div>
+      </div>
+
+      <div class="k-card">
+        <div class="k-kind"><span>📚 教程 · 数据库</span><span>刚刚</span></div>
+        <h5>SQLAlchemy 异步会话与行级锁</h5>
+        <p>with_for_update 在个人记忆并发写入中的应用。</p>
+        <div class="k-foot"><span class="dot-sync"></span>向量生成中 60%
+          <div class="k-acts"><button class="kbtn">编辑</button></div>
+        </div>
+      </div>
+
+      <div class="k-card">
+        <div class="k-kind"><span>🛡️ 设定 · 审核</span><span>14:20</span></div>
+        <h5>新增设定：向量检索问答规范</h5>
+        <p>maxinlong 提案 · 赞成 3 / 反对 1 · 余 6 小时</p>
+        <div class="k-foot">公开投票中
+          <div class="k-acts"><button class="kbtn">阅卷</button><button class="kbtn pri">批准</button></div>
+        </div>
+      </div>
+
+      <div class="k-card">
+        <div class="k-kind"><span>🛡️ 设定 · 审核</span><span>12:05</span></div>
+        <h5>修订：秒回喵性格设定 v3 → v4</h5>
+        <p>kaede 提案 · 赞成 5 / 反对 0 · 余 9 小时</p>
+        <div class="k-foot">公开投票中
+          <div class="k-acts"><button class="kbtn">阅卷</button><button class="kbtn pri">批准</button></div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+</div>
+</body>
+</html>

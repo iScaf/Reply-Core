@@ -38,6 +38,39 @@ services:
         condition: service_started
         required: false
 
+  web_admin:
+    # Web 管理后台（检索观测台）：python -m src.web
+    # 与 bot 共享 PG 与代码，仅暴露 8000 端口
+    restart: unless-stopped
+    mem_limit: 1g
+    env_file:
+      - .env
+    environment:
+      - RUNNING_IN_DOCKER=true
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3-embedding:0.6b}
+      - VECTOR_MODE=${VECTOR_MODE:-local}
+      - WEB_ADMIN_HOST=0.0.0.0
+      - WEB_ADMIN_PORT=8000
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    container_name: ${INSTANCE_NAME:-reply-core}_web_admin
+    volumes:
+      - .:/app
+      - ./data:/app/data
+    command: python3 -u -m src.web
+    ports:
+      - "${WEB_ADMIN_PORT:-8000}:8000"
+    networks:
+      - bot_network
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+        required: false
+
   searxng:
     image: searxng/searxng:latest
     container_name: ${INSTANCE_NAME:-reply-core}_searxng

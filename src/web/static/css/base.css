@@ -1,0 +1,63 @@
+/* ============================================================
+   检索观测台 · 基础 token（暗色）+ reset
+   双通道语义色：--vec=语义向量，--bm25=关键词
+   ============================================================ */
+:root {
+  color-scheme: dark;
+  --bg:      #0A101C;   /* 深海军黑 */
+  --panel:   #101827;   /* 面板 */
+  --panel-2: #0D1420;   /* 更深面板 */
+  --line:    #1E2A3E;   /* 描边 */
+  --text:    #C7D3E4;   /* 主文本 */
+  --dim:     #64789A;   /* 弱文本 */
+  --vec:     #2FD6CE;   /* 语义向量通道 · 青 */
+  --bm25:    #F0A63C;   /* BM25 关键词通道 · 琥珀 */
+  --rrf:     #E8EEF7;   /* 融合结果 · 白 */
+  --ok:      #4FCB6C;
+  --warn:    #E86A5E;
+  --on-vec: #04211F;
+  --selection: rgba(47,214,206,.25);
+  --row-hover: rgba(47,214,206,.04);
+  --line-row: rgba(30,42,62,.55);
+  --vec-half: rgba(47,214,206,.4);
+  --bm25-half: rgba(240,166,60,.4);
+  --vec-dim-bg: rgba(47,214,206,.08);
+  --vec-dim-border: rgba(47,214,206,.32);
+  --bm25-dim-bg: rgba(240,166,60,.1);
+  --bm25-dim-border: rgba(240,166,60,.32);
+  --ok-dim-border: rgba(79,203,108,.4);
+  --warn-dim-border: rgba(232,106,94,.4);
+  --ok-glow: rgba(79,203,108,.8);
+  --user-bubble-bg: #15304A;
+  --user-bubble-border: #1F4468;
+  --mono: "JetBrains Mono","Cascadia Code",Consolas,"Courier New",monospace;
+  --sans: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+/* 主题切换的平滑过渡（reduced-motion 下已全局禁用） */
+* { transition: background-color .25s ease, border-color .25s ease, color .25s ease; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+::selection { background: var(--selection); }
+a { color: var(--vec); text-decoration: none; }
+button { font-family: inherit; cursor: pointer; }
+input, select { font-family: inherit; }
+:focus-visible { outline: 2px solid var(--vec); outline-offset: 2px; }
+
+/* ---------- 登录视图 ---------- */
+.login-view { position:fixed; inset:0; display:grid; place-items:center; background:var(--bg); z-index:50; }
+.login-card { width:360px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:32px; }
+.login-card .lg { font-size:15px; letter-spacing:1px; color:var(--rrf); margin-bottom:4px; }
+.login-card .sub { font-size:11px; color:var(--dim); letter-spacing:1px; margin-bottom:22px; }
+.login-card input { width:100%; background:var(--panel-2); border:1px solid var(--line); border-radius:4px; color:var(--text); font-family:var(--mono); font-size:13px; padding:10px 12px; margin-bottom:12px; }
+.login-card input:focus { border-color:var(--vec); outline:none; }
+.login-card button { width:100%; background:var(--vec); color:var(--on-vec); border:none; border-radius:4px; padding:10px 0; font-weight:bold; letter-spacing:2px; }
+.login-card button:hover { filter:brightness(1.1); }
+.login-err { font-size:11px; color:var(--warn); min-height:18px; margin-top:10px; }
+body.authed .login-view { display:none; }
+body:not(.authed) .app { display:none; }

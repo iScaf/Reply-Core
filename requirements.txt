@@ -1,6 +1,7 @@
 # 项目核心依赖
 discord.py[speed]
 python-dotenv
+tzdata  # Windows 下 zoneinfo 的时区数据源（IANA 库），必须安装
 Pillow
 requests
 aiohttp
@@ -17,6 +18,10 @@ alembic
 # Data Processing & AI
 langchain-text-splitters
 numpy==1.26.4
+
+# Web 管理后台
+fastapi
+uvicorn[standard]
 
 httpx
 

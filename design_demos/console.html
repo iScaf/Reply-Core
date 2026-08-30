@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>秒回喵 // 检索观测台</title>
+<style>
+  /* ============================================================
+     检索观测台 · 双主题
+     主体：观测台（暗色仪器盘）；可切换档案馆（暖色纸感）。
+     双通道语义色保持一致：vec=语义向量，bm25=关键词。
+     暗色：青 / 琥珀；暖色：馆藏蓝 / 印章红。
+     ============================================================ */
+  :root {
+    color-scheme: dark;
+    --bg:      #0A101C;   /* 深海军黑 */
+    --panel:   #101827;   /* 面板 */
+    --panel-2: #0D1420;   /* 更深面板 */
+    --line:    #1E2A3E;   /* 描边 */
+    --text:    #C7D3E4;   /* 主文本 */
+    --dim:     #64789A;   /* 弱文本 */
+    --vec:     #2FD6CE;   /* 语义向量通道 · 青 */
+    --bm25:    #F0A63C;   /* BM25 关键词通道 · 琥珀 */
+    --rrf:     #E8EEF7;   /* 融合结果 · 白 */
+    --ok:      #4FCB6C;
+    --warn:    #E86A5E;
+    --on-vec: #04211F;                       /* vec 实底按钮上的文字 */
+    --selection: rgba(47,214,206,.25);
+    --row-hover: rgba(47,214,206,.04);
+    --line-row: rgba(30,42,62,.55);          /* 表格行分隔 */
+    --vec-half: rgba(47,214,206,.4);         /* 通道条渐变起点 */
+    --bm25-half: rgba(240,166,60,.4);
+    --vec-dim-bg: rgba(47,214,206,.08);      /* 引用徽章底 */
+    --vec-dim-border: rgba(47,214,206,.32);
+    --bm25-dim-bg: rgba(240,166,60,.1);
+    --bm25-dim-border: rgba(240,166,60,.32);
+    --ok-dim-border: rgba(79,203,108,.4);
+    --warn-dim-border: rgba(232,106,94,.4);
+    --ok-glow: rgba(79,203,108,.8);          /* 状态灯辉光 */
+    --user-bubble-bg: #15304A;               /* 问答抽屉用户气泡 */
+    --user-bubble-border: #1F4468;
+    --mono: "JetBrains Mono","Cascadia Code",Consolas,"Courier New",monospace;
+    --sans: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  }
+  /* --- 暖色主题：档案馆（取自 Demo B 编目馆色板） --- */
+  [data-theme="warm"] {
+    color-scheme: light;
+    --bg:      #F4F3EE;   /* 冷纸白 */
+    --panel:   #FDFCF8;   /* 卡片白 */
+    --panel-2: #F1EFE7;   /* 更深纸色 */
+    --line:    #D9D5C8;   /* 纸纹描边 */
+    --text:    #23312F;   /* 墨青 */
+    --dim:     #7A8074;   /* 灰绿弱文本 */
+    --vec:     #33608C;   /* 语义向量通道 · 馆藏蓝 */
+    --bm25:    #B5432E;   /* BM25 关键词通道 · 印章红 */
+    --rrf:     #1A2624;   /* 融合结果 · 深墨 */
+    --ok:      #3E7A52;
+    --warn:    #B5432E;
+    --on-vec: #FDFCF8;
+    --selection: rgba(51,96,140,.18);
+    --row-hover: rgba(51,96,140,.05);
+    --line-row: rgba(35,49,47,.16);
+    --vec-half: rgba(51,96,140,.45);
+    --bm25-half: rgba(181,67,46,.4);
+    --vec-dim-bg: rgba(51,96,140,.08);
+    --vec-dim-border: rgba(51,96,140,.38);
+    --bm25-dim-bg: rgba(181,67,46,.08);
+    --bm25-dim-border: rgba(181,67,46,.38);
+    --ok-dim-border: rgba(62,122,82,.45);
+    --warn-dim-border: rgba(181,67,46,.45);
+    --ok-glow: rgba(62,122,82,.45);
+    --user-bubble-bg: #EBF1F7;
+    --user-bubble-border: #C7D7E6;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  /* 主题切换的平滑过渡（reduced-motion 下已全局禁用） */
+  * { transition: background-color .25s ease, border-color .25s ease, color .25s ease; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  ::selection { background: var(--selection); }
+  a { color: var(--vec); text-decoration: none; }
+  button { font-family: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--vec); outline-offset: 2px; }
+
+  /* ---------- 整体骨架 ---------- */
+  .app { display: grid; grid-template-columns: 200px 1fr 400px; grid-template-rows: 52px 1fr; height: 100vh; min-width: 1100px; }
+  header { grid-column: 1 / 4; display:flex; align-items:center; justify-content:space-between; padding: 0 20px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+  nav    { grid-row: 2; border-right: 1px solid var(--line); background: var(--panel-2); padding: 16px 0; }
+  main   { grid-row: 2; overflow-y: auto; padding: 20px 24px; }
+  aside  { grid-row: 2; border-left: 1px solid var(--line); background: var(--panel-2); display:flex; flex-direction:column; overflow:hidden; }
+
+  /* ---------- 顶栏 ---------- */
+  .brand { display:flex; align-items:baseline; gap:10px; }
+  .brand b { font-size: 15px; letter-spacing: 1px; color: var(--rrf); }
+  .brand span { font-size: 11px; color: var(--dim); letter-spacing: 2px; }
+  .status { display:flex; gap:18px; font-size: 11px; color: var(--dim); }
+  .status em { font-style: normal; }
+  .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; vertical-align:1px; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 6px var(--ok-glow); }
+  .dot.warn { background: var(--warn); }
+  .status em b { color: var(--text); font-weight: normal; }
+  .head-right { display:flex; align-items:center; gap:16px; }
+  .theme-toggle { display:flex; align-items:center; gap:7px; background:var(--panel); border:1px solid var(--line); color:var(--text); border-radius:4px; font-size:11px; letter-spacing:1px; padding:5px 12px; }
+  .theme-toggle:hover { border-color:var(--vec); color:var(--vec); }
+  .theme-toggle .ic { color:var(--bm25); font-size:13px; line-height:1; }
+
+  /* ---------- 侧栏导航 ---------- */
+  .nav-group { padding: 0 14px 14px; }
+  .nav-label { font-size:10px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; padding: 0 6px 8px; }
+  .nav-item { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:4px; color:var(--text); border:1px solid transparent; margin-bottom:2px; }
+  .nav-item:hover { background: var(--panel); }
+  .nav-item.active { background: var(--panel); border-color: var(--line); color: var(--rrf); }
+  .nav-item .k { font-size:10px; color:var(--dim); }
+  .nav-item.active .k { color: var(--vec); }
+  .nav-badge { margin-left:auto; font-size:10px; background:var(--bm25-dim-bg); color:var(--bm25); padding:0 6px; border-radius:8px; border:1px solid var(--bm25-dim-border); }
+
+  /* ---------- 通用 ---------- */
+  .sec { margin-bottom: 22px; }
+  .sec-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 10px; }
+  .sec-title { font-size: 12px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase; }
+  .sec-title::before { content:"// "; color: var(--vec); }
+  .sec-sub { font-size: 11px; color: var(--dim); }
+
+  /* ---------- 检索测试台 ---------- */
+  .console { background: var(--panel); border:1px solid var(--line); border-radius:6px; padding:16px; }
+  .query-row { display:flex; gap:10px; }
+  .query-row .prompt-mark { color: var(--vec); align-self:center; font-weight:bold; }
+  .query-input { flex:1; background:var(--panel-2); border:1px solid var(--line); border-radius:4px; color:var(--text); font-family:inherit; font-size:13px; padding:9px 12px; }
+  .query-input:focus { border-color: var(--vec); outline:none; }
+  .btn-run { background:var(--vec); color:var(--on-vec); border:none; border-radius:4px; padding:0 18px; font-weight:bold; letter-spacing:1px; }
+  .btn-run:hover { filter:brightness(1.1); }
+
+  /* 双通道分数可视化 —— 签名元素 */
+  .channels { display:grid; grid-template-columns: 1fr 1fr 130px; gap:14px; margin-top:16px; padding-top:14px; border-top:1px dashed var(--line); }
+  .channel h4 { font-size:11px; letter-spacing:1px; margin-bottom:8px; }
+  .channel.vec h4 { color: var(--vec); }
+  .channel.bm25 h4 { color: var(--bm25); }
+  .fusion h4 { color: var(--rrf); }
+  .hits { display:flex; flex-direction:column; gap:5px; }
+  .hit { display:flex; align-items:center; gap:8px; font-size:11px; }
+  .hit .rank { width:22px; color:var(--dim); }
+  .hit .bar-track { flex:1; height:8px; background:var(--panel-2); border-radius:2px; overflow:hidden; }
+  .hit .bar { height:100%; border-radius:2px; }
+  .channel.vec .bar { background:linear-gradient(90deg, var(--vec-half), var(--vec)); }
+  .channel.bm25 .bar { background:linear-gradient(90deg, var(--bm25-half), var(--bm25)); }
+  .hit .score { width:44px; text-align:right; color:var(--dim); }
+  .fusion-body { display:flex; flex-direction:column; gap:6px; justify-content:center; height:100%; }
+  .fusion-item { display:flex; align-items:center; gap:8px; font-size:12px; }
+  .fusion-item .medal { width:20px; height:20px; border:1px solid var(--line); border-radius:3px; display:grid; place-items:center; font-size:10px; color:var(--rrf); background:var(--panel-2); }
+  .fusion-item.top .medal { border-color:var(--vec); color:var(--vec); }
+  .fusion-item .fname { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fusion-item .fscore { margin-left:auto; color:var(--dim); font-size:11px; }
+
+  /* ---------- 健康统计条 ---------- */
+  .vitals { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:22px; }
+  .vital { background:var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .vital .v { font-size:19px; color:var(--rrf); }
+  .vital .l { font-size:10px; color:var(--dim); letter-spacing:1px; margin-top:2px; }
+  .vital .v small { font-size:11px; color:var(--dim); }
+
+  /* ---------- 文档表 ---------- */
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  thead th { font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:var(--dim); text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); background:var(--panel-2); font-weight:normal; }
+  tbody td { padding:9px 12px; border-bottom:1px solid var(--line-row); font-size:12px; vertical-align:middle; }
+  tbody tr:last-child td { border-bottom:none; }
+  tbody tr:hover { background:var(--row-hover); }
+  .doc-id { color:var(--dim); font-size:11px; }
+  .doc-title { color:var(--rrf); }
+  .doc-title small { display:block; color:var(--dim); font-size:10px; font-weight:normal; }
+  .tag { display:inline-block; font-size:10px; color:var(--dim); border:1px solid var(--line); border-radius:3px; padding:0 5px; margin-right:4px; }
+  .chip-db { color:var(--vec); border-color:var(--vec-dim-border); }
+  .chip-bot { color:var(--bm25); border-color:var(--bm25-dim-border); }
+  .dualbar { width:110px; }
+  .dualbar .row { display:flex; align-items:center; gap:5px; }
+  .dualbar .row + .row { margin-top:3px; }
+  .dualbar .k { font-size:9px; width:30px; color:var(--dim); }
+  .dualbar .t { flex:1; height:5px; background:var(--panel-2); border-radius:2px; overflow:hidden; }
+  .dualbar .v-vec { height:100%; background:var(--vec); }
+  .dualbar .v-bm25 { height:100%; background:var(--bm25); }
+  .rrf-no { color:var(--rrf); font-size:12px; }
+  .rrf-no b { color:var(--vec); }
+  .state-ok { color:var(--ok); font-size:11px; }
+  .state-pend { color:var(--bm25); font-size:11px; }
+
+  /* ---------- 审核队列 ---------- */
+  .review-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .review-card { background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--bm25); border-radius:6px; padding:12px 14px; }
+  .review-card h5 { font-size:12px; color:var(--rrf); margin-bottom:4px; font-weight:normal; }
+  .review-card p { font-size:11px; color:var(--dim); margin-bottom:8px; }
+  .review-meta { display:flex; justify-content:space-between; font-size:10px; color:var(--dim); margin-bottom:10px; }
+  .review-acts { display:flex; gap:8px; }
+  .btn { border-radius:4px; border:1px solid var(--line); background:var(--panel-2); color:var(--text); font-size:11px; padding:4px 12px; }
+  .btn:hover { border-color:var(--dim); }
+  .btn.ok { color:var(--ok); border-color:var(--ok-dim-border); }
+  .btn.no { color:var(--warn); border-color:var(--warn-dim-border); }
+
+  /* ---------- 右侧问答演示 ---------- */
+  .aside-head { padding:14px 16px; border-bottom:1px solid var(--line); font-size:12px; letter-spacing:1px; color:var(--rrf); display:flex; justify-content:space-between; align-items:center; }
+  .aside-head span { font-size:10px; color:var(--dim); letter-spacing:1px; }
+  .chat { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:14px; }
+  .msg { max-width: 92%; }
+  .msg.user { align-self:flex-end; }
+  .msg .who { font-size:10px; color:var(--dim); margin-bottom:4px; letter-spacing:1px; }
+  .msg .bubble { border-radius:8px; padding:10px 12px; font-size:12.5px; }
+  .msg.user .bubble { background:var(--user-bubble-bg); border:1px solid var(--user-bubble-border); border-bottom-right-radius:2px; font-family:var(--sans); }
+  .msg.bot .bubble { background:var(--panel); border:1px solid var(--line); border-bottom-left-radius:2px; font-family:var(--sans); }
+  .cite { display:inline-block; font-size:10px; font-family:var(--mono); color:var(--vec); background:var(--vec-dim-bg); border:1px solid var(--vec-dim-border); border-radius:3px; padding:0 4px; margin:0 2px; vertical-align:1px; }
+  .cite.k { color:var(--bm25); background:var(--bm25-dim-bg); border-color:var(--bm25-dim-border); }
+  .tool-trace { margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); font-size:10px; color:var(--dim); font-family:var(--mono); line-height:1.8; }
+  .tool-trace b { color:var(--vec); font-weight:normal; }
+  .chat-input { border-top:1px solid var(--line); padding:12px 14px; display:flex; gap:8px; }
+  .chat-input input { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:4px; color:var(--text); font-family:var(--sans); font-size:12.5px; padding:8px 11px; }
+  .chat-input input:focus { border-color:var(--vec); outline:none; }
+  .chat-input button { background:transparent; border:1px solid var(--line); border-radius:4px; color:var(--vec); padding:0 12px; }
+
+  @media (prefers-reduced-motion: reduce) { * { animation:none!important; transition:none!important; } }
+</style>
+<script>
+  /* 防闪烁：在样式渲染前先恢复上次选择的主题 */
+  try { if (localStorage.getItem('rc-theme') === 'warm') document.documentElement.dataset.theme = 'warm'; } catch (e) {}
+</script>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="brand"><b>秒回喵 //</b><span>REPLY-CORE 检索观测台</span></div>
+    <div class="head-right">
+      <div class="status">
+        <em><span class="dot ok"></span>db <b>paradedb:5432</b></em>
+        <em><span class="dot ok"></span>vec <b>api / bge-m3</b></em>
+        <em><span class="dot ok"></span>provider <b>gemini-2.5-flash</b></em>
+        <em><span class="dot warn"></span>queue <b>3 待审</b></em>
+      </div>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" title="切换暖色档案馆主题"><span class="ic">◐</span><span id="themeLabel">档案馆模式</span></button>
+    </div>
+  </header>
+
+  <nav>
+    <div class="nav-group">
+      <div class="nav-label">观测</div>
+      <div class="nav-item active"><span class="k">01</span> 检索测试台</div>
+      <div class="nav-item"><span class="k">02</span> 知识库健康</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">知识库</div>
+      <div class="nav-item"><span class="k">03</span> 教程库</div>
+      <div class="nav-item"><span class="k">04</span> 社区设定</div>
+      <div class="nav-item"><span class="k">05</span> 论坛帖索引</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-label">运行</div>
+      <div class="nav-item"><span class="k">06</span> 审核队列 <span class="nav-badge">3</span></div>
+      <div class="nav-item"><span class="k">07</span> Provider 配置</div>
+      <div class="nav-item"><span class="k">08</span> Token 统计</div>
+    </div>
+  </nav>
+
+  <main>
+    <!-- 检索测试台：签名元素 = 双通道 → RRF 融合 -->
+    <section class="sec">
+      <div class="sec-head">
+        <div class="sec-title">检索测试台</div>
+        <div class="sec-sub">pgvector HNSW ⇄ ParadeDB BM25 → RRF(k=60) · 耗时 412ms</div>
+      </div>
+      <div class="console">
+        <div class="query-row">
+          <span class="prompt-mark">&gt;_</span>
+          <input class="query-input" value="HNSW 索引的 ef_search 应该怎么调？">
+          <button class="btn-run">执行检索</button>
+        </div>
+        <div class="channels">
+          <div class="channel vec">
+            <h4>语义通道 · bge-m3 ⇔ halfvec_cosine</h4>
+            <div class="hits">
+              <div class="hit"><span class="rank">#1</span><div class="bar-track"><div class="bar" style="width:88%"></div></div><span class="score">0.183</span></div>
+              <div class="hit"><span class="rank">#2</span><div class="bar-track"><div class="bar" style="width:71%"></div></div><span class="score">0.241</span></div>
+              <div class="hit"><span class="rank">#3</span><div class="bar-track"><div class="bar" style="width:44%"></div></div><span class="score">0.377</span></div>
+            </div>
+          </div>
+          <div class="channel bm25">
+            <h4>关键词通道 · pdb.chinese_compatible</h4>
+            <div class="hits">
+              <div class="hit"><span class="rank">#1</span><div class="bar-track"><div class="bar" style="width:76%"></div></div><span class="score">8.42</span></div>
+              <div class="hit"><span class="rank">#2</span><div class="bar-track"><div class="bar" style="width:63%"></div></div><span class="score">7.90</span></div>
+              <div class="hit"><span class="rank">#3</span><div class="bar-track"><div class="bar" style="width:38%"></div></div><span class="score">6.11</span></div>
+            </div>
+          </div>
+          <div class="fusion">
+            <h4>RRF 融合结果</h4>
+            <div class="fusion-body">
+              <div class="fusion-item top"><span class="medal">1</span><span class="fname">pgvector HNSW 索引调优实战</span><span class="fscore">0.0328</span></div>
+              <div class="fusion-item"><span class="medal">2</span><span class="fname">ParadeDB BM25 中文分词</span><span class="fscore">0.0319</span></div>
+              <div class="fusion-item"><span class="medal">3</span><span class="fname">混合检索 SQL 全解析</span><span class="fscore">0.0216</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 健康统计 -->
+    <div class="vitals">
+      <div class="vital"><div class="v">128</div><div class="l">教程文档</div></div>
+      <div class="vital"><div class="v">342</div><div class="l">社区设定条目</div></div>
+      <div class="vital"><div class="v">5,206</div><div class="l">论坛帖索引</div></div>
+      <div class="vital"><div class="v">12,847</div><div class="l">向量块 chunks</div></div>
+      <div class="vital"><div class="v">98.2<small>%</small></div><div class="l">近7日检索命中率</div></div>
+    </div>
+
+    <!-- 文档列表 -->
+    <section class="sec">
+      <div class="sec-head">
+        <div class="sec-title">知识库 · 教程库</div>
+        <div class="sec-sub">128 篇 · 显示最近更新 5 条</div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>编号</th><th>标题</th><th>分类</th><th>chunks</th><th>检索热度</th><th>状态</th><th>更新</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="doc-id">T-042</td>
+            <td class="doc-title">pgvector HNSW 索引调优实战<small>m, ef_construction 与召回率的权衡</small></td>
+            <td><span class="tag chip-db">数据库</span></td>
+            <td>24</td>
+            <td><div class="dualbar">
+              <div class="row"><span class="k">vec</span><div class="t"><div class="v-vec" style="width:86%"></div></div></div>
+              <div class="row"><span class="k">bm25</span><div class="t"><div class="v-bm25" style="width:72%"></div></div></div>
+            </div></td>
+            <td><span class="rrf-no"><b>①</b> RRF.1</span></td>
+            <td class="state-ok">已索引 · 2h 前</td>
+          </tr>
+          <tr>
+            <td class="doc-id">T-041</td>
+            <td class="doc-title">ParadeDB BM25 中文分词指南<small>pdb.chinese_compatible 解析器实测</small></td>
+            <td><span class="tag chip-db">数据库</span></td>
+            <td>18</td>
+            <td><div class="dualbar">
+              <div class="row"><span class="k">vec</span><div class="t"><div class="v-vec" style="width:64%"></div></div></div>
+              <div class="row"><span class="k">bm25</span><div class="t"><div class="v-bm25" style="width:88%"></div></div></div>
+            </div></td>
+            <td><span class="rrf-no"><b>②</b> RRF.2</span></td>
+            <td class="state-ok">已索引 · 6h 前</td>
+          </tr>
+          <tr>
+            <td class="doc-id">T-039</td>
+            <td class="doc-title">discord.py 斜杠命令同步机制<small>GUILD_ID 即时同步 vs 全局同步</small></td>
+            <td><span class="tag chip-bot">discord.py</span></td>
+            <td>12</td>
+            <td><div class="dualbar">
+              <div class="row"><span class="k">vec</span><div class="t"><div class="v-vec" style="width:47%"></div></div></div>
+              <div class="row"><span class="k">bm25</span><div class="t"><div class="v-bm25" style="width:41%"></div></div></div>
+            </div></td>
+            <td><span class="rrf-no">—</span></td>
+            <td class="state-ok">已索引 · 昨天</td>
+          </tr>
+          <tr>
+            <td class="doc-id">T-037</td>
+            <td class="doc-title">RRF 融合排序原理与 k 值选择<small>为什么 k=60 是经验默认</small></td>
+            <td><span class="tag chip-db">检索</span></td>
+            <td>9</td>
+            <td><div class="dualbar">
+              <div class="row"><span class="k">vec</span><div class="t"><div class="v-vec" style="width:58%"></div></div></div>
+              <div class="row"><span class="k">bm25</span><div class="t"><div class="v-bm25" style="width:29%"></div></div></div>
+            </div></td>
+            <td><span class="rrf-no">—</span></td>
+            <td class="state-ok">已索引 · 3d 前</td>
+          </tr>
+          <tr>
+            <td class="doc-id">T-043</td>
+            <td class="doc-title">SQLAlchemy 异步会话与行级锁<small>with_for_update 在记忆写入中的应用</small></td>
+            <td><span class="tag chip-db">数据库</span></td>
+            <td>14</td>
+            <td><div class="dualbar">
+              <div class="row"><span class="k">vec</span><div class="t"><div class="v-vec" style="width:0%"></div></div></div>
+              <div class="row"><span class="k">bm25</span><div class="t"><div class="v-bm25" style="width:0%"></div></div></div>
+            </div></td>
+            <td><span class="rrf-no">—</span></td>
+            <td><span class="state-pend">向量生成中…</span></td>
+            </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 审核队列 -->
+    <section class="sec">
+      <div class="sec-head">
+        <div class="sec-title">审核队列 · community_settings.pending_entries</div>
+        <div class="sec-sub">公开投票中 · 管理员可直接批准</div>
+      </div>
+      <div class="review-grid">
+        <div class="review-card">
+          <h5>新增设定：向量检索问答规范</h5>
+          <p>提案人 maxinlong · 提交于 14:20</p>
+          <div class="review-meta"><span>投票 3 赞 / 1 反</span><span>距截止 6h</span></div>
+          <div class="review-acts"><button class="btn ok">批准收录</button><button class="btn no">驳回</button><button class="btn">查看</button></div>
+        </div>
+        <div class="review-card">
+          <h5>修订：秒回喵性格设定 v3 → v4</h5>
+          <p>提案人 kaede · 提交于 12:05</p>
+          <div class="review-meta"><span>投票 5 赞 / 0 反</span><span>距截止 9h</span></div>
+          <div class="review-acts"><button class="btn ok">批准收录</button><button class="btn no">驳回</button><button class="btn">查看</button></div>
+        </div>
+        <div class="review-card">
+          <h5>新增设定：Bot 冷却策略说明</h5>
+          <p>提案人 yuki · 提交于 09:47</p>
+          <div class="review-meta"><span>投票 1 赞 / 2 反</span><span>距截止 2h</span></div>
+          <div class="review-acts"><button class="btn ok">批准收录</button><button class="btn no">驳回</button><button class="btn">查看</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 问答演示抽屉 -->
+  <aside>
+    <div class="aside-head">问答演示 <span>scope: all · tools: on</span></div>
+    <div class="chat">
+      <div class="msg user">
+        <div class="who" style="text-align:right">maxinlong</div>
+        <div class="bubble">HNSW 的 ef_search 设多少比较合适？召回一直上不去。</div>
+      </div>
+      <div class="msg bot">
+        <div class="who">秒回喵 · Reply-Core</div>
+        <div class="bubble">
+          先确认两件事：① 建索引时的 <span class="cite">T-042 §2</span> <b>m</b> 和 <b>ef_construction</b> 决定召回上限，运行时的 <b>ef_search</b> 只能在上限内调整；② 你当前 halfvec_cosine 距离在 0.24 左右说明向量质量正常，问题多半在 ef_search 偏小。<span class="cite">T-042 §4</span> 建议从 64 起步，召回不达标时翻倍到 128，观察延迟再决定是否重建索引。
+          <div class="tool-trace">
+            ⚙ search(query="ef_search 召回率", scope=tutorials)<br>
+            ├ <b>vec</b> HNSW 命中 3 · <b>bm25</b> 命中 2 → RRF 合并<br>
+            └ 引用 T-042 §2/§4 · 耗时 412ms
+          </div>
+        </div>
+      </div>
+      <div class="msg user">
+        <div class="who" style="text-align:right">maxinlong</div>
+        <div class="bubble">那 ef_construction 呢？ rebuild 代价大吗？</div>
+      </div>
+    </div>
+    <div class="chat-input">
+      <input placeholder="以用户身份提问，测试检索效果…">
+      <button>发送</button>
+    </div>
+  </aside>
+</div>
+<script>
+  /* 主题切换：观测台（暗）⇄ 档案馆（暖），localStorage 持久化 */
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById('themeToggle');
+    var label = document.getElementById('themeLabel');
+    function target() { return root.dataset.theme === 'warm' ? 'dark' : 'warm'; }
+    function paint(t) {
+      label.textContent = t === 'warm' ? '观测台模式' : '档案馆模式';
+      btn.setAttribute('aria-pressed', t === 'warm' ? 'true' : 'false');
+      btn.title = t === 'warm' ? '切回暗色观测台主题' : '切换暖色档案馆主题';
+    }
+    btn.addEventListener('click', function () {
+      var t = target();
+      root.dataset.theme = t;
+      try { localStorage.setItem('rc-theme', t); } catch (e) {}
+      paint(t);
+    });
+    paint(root.dataset.theme === 'warm' ? 'warm' : 'dark');
+  })();
+</script>
+</body>
+</html>
