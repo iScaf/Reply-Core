@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from sqlalchemy.future import select
 from sqlalchemy import update
@@ -145,8 +145,8 @@ class PersonalMemoryService:
                     log.warning(f"用户 {user_id} 没有个人档案，无法记录记忆。")
                     return
 
-                # 添加带时间戳的对话记录
-                now = datetime.now().isoformat()
+                # 添加带时间戳的对话记录（UTC aware，供对话块提取时间范围用）
+                now = datetime.now(timezone.utc).isoformat()
                 new_turn = {"role": "user", "parts": [user_content], "timestamp": now}
                 new_model_turn = {
                     "role": "model",

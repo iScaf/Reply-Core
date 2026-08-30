@@ -10,7 +10,7 @@
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 from sqlalchemy import text
@@ -258,12 +258,16 @@ class ConversationMemorySearchService:
                 start_time = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
             if isinstance(end_time, str):
                 end_time = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            if isinstance(start_time, datetime) and start_time.tzinfo is None:
+                start_time = start_time.replace(tzinfo=timezone.utc)
+            if isinstance(end_time, datetime) and end_time.tzinfo is None:
+                end_time = end_time.replace(tzinfo=timezone.utc)
 
             # 确保时间不为 None
             if start_time is None:
-                start_time = datetime.now()
+                start_time = datetime.now(timezone.utc)
             if end_time is None:
-                end_time = datetime.now()
+                end_time = datetime.now(timezone.utc)
 
             time_desc = format_time_description(start_time, end_time)
 

@@ -14,7 +14,7 @@ from src.chat.features.community_settings.ui.contribution_modal import (
 log = logging.getLogger(__name__)
 
 
-class CommunitySettingsCog(commands.Cog):
+class CommunitySettingCommandsCog(commands.Cog):
     """社区设定管理命令"""
 
     def __init__(self, bot: commands.Bot):
@@ -46,5 +46,5 @@ class CommunitySettingsCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(CommunitySettingsCog(bot))
+    await bot.add_cog(CommunitySettingCommandsCog(bot))
     log.info("社区设定命令已加载。")

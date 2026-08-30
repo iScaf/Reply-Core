@@ -9,7 +9,7 @@
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
 from sqlalchemy import select, delete, func
@@ -43,7 +43,7 @@ def format_time_description(start_time: datetime, end_time: datetime) -> str:
     - 一年内：X个月前
     - 超过一年：X年前
     """
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     delta = now - start_time
 
     # 计算今天开始的时间
@@ -163,13 +163,16 @@ class ConversationBlockService:
                         ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                     except ValueError:
                         continue
+                if isinstance(ts, datetime) and ts.tzinfo is None:
+                    # 旧 history JSON 中的 naive 时间戳按 UTC 兜底（时间列已统一 timestamptz）
+                    ts = ts.replace(tzinfo=timezone.utc)
                 timestamps.append(ts)
 
         if timestamps:
             return min(timestamps), max(timestamps)
         else:
-            # 如果没有时间戳，使用当前时间
-            now = datetime.now()
+            # 如果没有时间戳，使用当前时间（UTC，与时区感知的时间列一致）
+            now = datetime.now(timezone.utc)
             return now, now
 
     async def create_block_from_history(
@@ -584,7 +587,7 @@ class ConversationBlockService:
     ) -> int:
         from datetime import timedelta
 
-        cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(

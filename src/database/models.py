@@ -7,6 +7,7 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Date,
     ForeignKey,
     JSON,
     Index,
@@ -25,6 +26,10 @@ COMMUNITY_SETTINGS_SCHEMA = "community_settings"
 COMMUNITY_SCHEMA = "community"
 USER_SCHEMA = "user"
 FORUM_SCHEMA = "forum"
+CONVERSATION_SCHEMA = "conversation"
+AI_CONFIG_SCHEMA = "ai_config"
+CONTENT_FILTER_SCHEMA = "content_filter"
+BOT_SCHEMA = "bot"
 
 Base = declarative_base()
 
@@ -50,8 +55,10 @@ class TutorialDocument(Base):
     # 完整的原始内容存储在这里，以备参考和重新分块。
     original_content = Column(Text, nullable=False)
 
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     # 这创建了与 KnowledgeChunk 的一对多关系。
     chunks = relationship("KnowledgeChunk", back_populates="document")
@@ -119,9 +126,14 @@ class KnowledgeChunk(Base):
         comment="Qwen3-Embedding-0.6B 模型的嵌入向量。",
     )
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.datetime.now(datetime.timezone.utc),
+    )
     updated_at = Column(
-        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+        DateTime(timezone=True),
+        default=lambda: datetime.datetime.now(datetime.timezone.utc),
+        onupdate=lambda: datetime.datetime.now(datetime.timezone.utc),
     )
 
     # 这创建了回到 TutorialDocument 的多对一关系。
@@ -148,8 +160,8 @@ class ThreadSetting(Base):
         default="ISOLATED",
         comment="教程搜索模式: 'ISOLATED' (隔离) 或 'PRIORITY' (优先)",
     )
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self):
         return f"<ThreadSetting(thread_id='{self.thread_id}', search_mode='{self.search_mode}')>"
@@ -176,8 +188,8 @@ class CommunitySettingDocument(Base):
         Text, nullable=False, comment="完整的文本内容，用于重新分块和BM25搜索"
     )
     source_metadata = Column(JSON, nullable=True, comment="完整元数据备份")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # 与分块的一对多关系
     chunks = relationship(
@@ -237,7 +249,7 @@ class CommunitySettingChunk(Base):
         comment="Qwen3-Embedding-0.6B 模型的嵌入向量。",
     )
 
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # 回到 CommunitySettingDocument 的多对一关系
     document = relationship("CommunitySettingDocument", back_populates="chunks")
@@ -272,8 +284,8 @@ class CommunitySettingPendingEntry(Base):
     status = Column(
         String(20), nullable=False, default="pending", comment="pending/approved/rejected"
     )
-    created_at = Column(DateTime, server_default=func.now())
-    expires_at = Column(DateTime, nullable=False, comment="审核过期时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, comment="审核过期时间")
 
     def __repr__(self):
         return f"<CommunitySettingPendingEntry(id={self.id}, status='{self.status}')>"
@@ -308,8 +320,8 @@ class CommunityMemberProfile(Base):
         comment="完整的成员档案文本，用于重新分块和BM25搜索",
     )
     source_metadata = Column(JSON, nullable=True, comment="存储原始的、完整的成员档案")
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     personal_summary = Column(Text, nullable=True, comment="个人记忆")
     history = Column(JSON, nullable=True, comment="用于生成最近一次个人记忆")
     personal_message_count = Column(
@@ -327,10 +339,11 @@ class TokenUsage(Base):
     """
 
     __tablename__ = "token_usage"
+    __table_args__ = {"schema": BOT_SCHEMA}
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    date: Mapped[datetime.datetime] = mapped_column(
-        nullable=False, unique=True, default=datetime.datetime.utcnow
+    date: Mapped[datetime.date] = mapped_column(
+        Date, nullable=False, unique=True, default=datetime.date.today
     )
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)
@@ -364,10 +377,10 @@ class UserToolSettings(Base):
         comment="用户启用的工具列表（JSON格式），为null表示启用所有工具",
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     def __repr__(self):
@@ -394,10 +407,10 @@ class UserCommandSettings(Base):
         comment="用户启用的命令列表（JSON格式），为null表示启用所有命令",
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     def __repr__(self):
@@ -424,10 +437,10 @@ class UserPersonaPreference(Base):
         comment="人设风格: default(默认) | gentle(温柔)",
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     def __repr__(self):
@@ -459,10 +472,10 @@ class UserMemoryNote(Base):
         Text, nullable=False, comment="记忆内容（单条不超过150字）"
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     def __repr__(self):
@@ -540,7 +553,7 @@ class ForumThread(Base):
 
     # 时间戳
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, nullable=False, comment="帖子创建时间（Discord时间）"
+        DateTime(timezone=True), nullable=False, comment="帖子创建时间（Discord时间）"
     )
 
     # 可选字段
@@ -560,10 +573,10 @@ class ForumThread(Base):
 
     # 数据库管理时间戳
     created_at_db: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), comment="数据库记录创建时间"
+        DateTime(timezone=True), server_default=func.now(), comment="数据库记录创建时间"
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         comment="数据库记录更新时间",
@@ -602,8 +615,7 @@ class ForumBackfillStatus(Base):
 # --- 对话记忆块模型 (ParadeDB) ---
 
 
-# 对话记忆使用的 schema
-CONVERSATION_SCHEMA = "conversation"
+# 对话记忆使用的 schema 见顶部 CONVERSATION_SCHEMA
 
 
 class ConversationBlock(Base):
@@ -651,10 +663,10 @@ class ConversationBlock(Base):
 
     # 时间范围（用于显示"X天前的对话"）
     start_time: Mapped[datetime.datetime] = mapped_column(
-        DateTime, nullable=False, comment="对话块中第一条消息的时间"
+        DateTime(timezone=True), nullable=False, comment="对话块中第一条消息的时间"
     )
     end_time: Mapped[datetime.datetime] = mapped_column(
-        DateTime, nullable=False, comment="对话块中最后一条消息的时间"
+        DateTime(timezone=True), nullable=False, comment="对话块中最后一条消息的时间"
     )
 
     # 消息数量
@@ -684,10 +696,10 @@ class ConversationBlock(Base):
 
     # 数据库管理时间戳
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), comment="数据库记录创建时间"
+        DateTime(timezone=True), server_default=func.now(), comment="数据库记录创建时间"
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         comment="数据库记录更新时间",
@@ -712,7 +724,7 @@ class UserWarningRecord(Base):
     guild_id: Mapped[str] = mapped_column(String(50), nullable=False)
     warning_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     def __repr__(self):
@@ -722,9 +734,6 @@ class UserWarningRecord(Base):
 
 
 # --- AI Provider / Model 配置模型 (PostgreSQL) ---
-
-
-AI_CONFIG_SCHEMA = "ai_config"
 
 
 class AiProvider(Base):
@@ -764,10 +773,10 @@ class AiProvider(Base):
         Integer, nullable=False, default=1, comment="是否启用 (1=启用, 0=禁用)"
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     models: Mapped[list["AiModel"]] = relationship(
@@ -832,10 +841,10 @@ class AiModel(Base):
         Integer, nullable=False, default=1, comment="是否启用 (1=启用, 0=禁用)"
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
     provider: Mapped["AiProvider"] = relationship("AiProvider", back_populates="models")
@@ -845,8 +854,6 @@ class AiModel(Base):
 
 
 # --- 内容过滤关键词模型 (PostgreSQL) ---
-
-CONTENT_FILTER_SCHEMA = "content_filter"
 
 
 class ContentFilterKeyword(Base):
@@ -865,7 +872,7 @@ class ContentFilterKeyword(Base):
         Integer, nullable=False, default=0
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
+        DateTime(timezone=True), server_default=func.now()
     )
 
     def __repr__(self):
@@ -873,8 +880,6 @@ class ContentFilterKeyword(Base):
 
 
 # --- Bot 运行时数据模型（原遗留 SQLite chat.db 迁移至 PostgreSQL） ---
-
-BOT_SCHEMA = "bot"
 
 
 class GlobalSetting(Base):
@@ -885,7 +890,7 @@ class GlobalSetting(Base):
 
     key = Column(String(100), primary_key=True)
     value = Column(Text, nullable=True)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self):
         return f"<GlobalSetting(key='{self.key}')>"

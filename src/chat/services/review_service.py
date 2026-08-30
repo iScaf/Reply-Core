@@ -35,6 +35,7 @@ REJECT_EMOJI = REVIEW_SETTINGS["reject_emoji"]
 
 
 def _utcnow() -> datetime:
+    """带时区的 UTC 当前时间（全部时间列已统一为 timestamptz）。"""
     return datetime.now(timezone.utc)
 
 
