@@ -82,7 +82,7 @@ Cog 加载在 `setup_hook()` 中动态完成：扫描 `src/chat/cogs/` **和** �
 
 ### 身份配置（config/bot.yaml）
 
-Bot 名称、社区名等身份信息集中在 `config/bot.yaml`（当前身份：小回 / Reply-Core 技术社区），由 `src/config.py` 加载为全局常量。`prompts.py` 的 `_apply_identity()` 在 bot.yaml 身份与默认身份不一致时做字面量替换。**不要在代码或提示词中硬编码 Bot 名称/社区名**，一律引用 `src/config.py` 的常量。
+Bot 名称、社区名等身份信息集中在 `config/bot.yaml`（当前身份：秒回喵 / Reply-Core 技术社区），由 `src/config.py` 加载为全局常量。`prompts.py` 的 `_apply_identity()` 在 bot.yaml 身份与默认身份不一致时做字面量替换。**不要在代码或提示词中硬编码 Bot 名称/社区名**，一律引用 `src/config.py` 的常量。
 
 ### 测试约定
 
