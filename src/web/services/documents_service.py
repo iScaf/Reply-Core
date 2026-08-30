@@ -16,8 +16,10 @@ from src.database.models import (
 log = logging.getLogger(__name__)
 
 _SOURCE_MODEL = {
-    "tutorials": (TutorialDocument, KnowledgeChunk),
-    "community_settings": (CommunitySettingDocument, CommunitySettingChunk),
+    # (文档模型, chunk 模型, 全文列名)：教程库全文列为 original_content，
+    # 社区设定为 full_text
+    "tutorials": (TutorialDocument, KnowledgeChunk, "original_content"),
+    "community_settings": (CommunitySettingDocument, CommunitySettingChunk, "full_text"),
 }
 
 
@@ -35,7 +37,7 @@ class DocumentsService:
         q: Optional[str] = None,
     ) -> Dict[str, Any]:
         _check_source(source)
-        doc_model, chunk_model = _SOURCE_MODEL[source]
+        doc_model, chunk_model, fulltext_col = _SOURCE_MODEL[source]
         offset = (page - 1) * page_size
 
         async with AsyncSessionLocal() as session:
@@ -44,7 +46,7 @@ class DocumentsService:
                 base = base.where(
                     or_(
                         doc_model.title.ilike(f"%{q}%"),
-                        doc_model.full_text.ilike(f"%{q}%"),
+                        getattr(doc_model, fulltext_col).ilike(f"%{q}%"),
                     )
                 )
             total = (
@@ -89,7 +91,7 @@ class DocumentsService:
 
     async def get_document(self, source: str, doc_id: int) -> Optional[Dict[str, Any]]:
         _check_source(source)
-        doc_model, chunk_model = _SOURCE_MODEL[source]
+        doc_model, chunk_model, fulltext_col = _SOURCE_MODEL[source]
         async with AsyncSessionLocal() as session:
             doc = (
                 await session.execute(
@@ -129,7 +131,7 @@ class DocumentsService:
             "category": getattr(doc, "category", None),
             "author": getattr(doc, "author", None),
             "source_url": getattr(doc, "source_url", None),
-            "full_text": doc.full_text,
+            "full_text": getattr(doc, fulltext_col, None),
             "created_at": doc.created_at.isoformat() if doc.created_at else None,
             "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
             "chunks": chunk_items,

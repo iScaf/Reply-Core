@@ -1,9 +1,9 @@
-/* 主逻辑：登录 / 统计 / 检索台 / 文档表 / 审核队列 / 问答抽屉 */
+/* 主逻辑：登录 / 视图切换 / 统计 / 检索台 / 文档库（教程·设定）/ 审核队列 / 问答演示 */
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
 
-  /* ---------- 登录 / 登出 ---------- */
+  /* ================= 登录 / 登出 ================= */
   $('loginBtn').addEventListener('click', doLogin);
   $('tokenInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
   async function doLogin() {
@@ -21,19 +21,38 @@
     document.body.classList.remove('authed');
   });
 
-  /* ---------- 初始化 ---------- */
-  enterConsole();
+  /* ================= 视图切换 ================= */
+  var entered = false;
+  var loaders = {
+    'search': async function () { try { renderStats(await api('/api/stats')); } catch (e) {} },
+    'docs-tutorials': function () { docViews.tutorials.refresh(); },
+    'docs-settings': function () { docViews.settings.refresh(); },
+    'review': loadReview,
+  };
+  function showView(name) {
+    document.querySelectorAll('.nav-item').forEach(function (n) {
+      n.classList.toggle('active', n.dataset.view === name);
+    });
+    document.querySelectorAll('.view').forEach(function (v) {
+      v.classList.toggle('hidden', v.id !== 'view-' + name);
+    });
+    if (loaders[name]) loaders[name]();
+  }
+  document.querySelectorAll('.nav-item').forEach(function (n) {
+    n.addEventListener('click', function () { showView(n.dataset.view); });
+  });
+
   async function enterConsole() {
     try {
       const stats = await api('/api/stats');
       document.body.classList.add('authed');
       renderStats(stats);
-      loadDocuments();
-      loadReview();
+      if (!entered) { entered = true; showView('search'); }
+      else { showView(document.querySelector('.nav-item.active').dataset.view); }
     } catch (e) { /* 401 已由 api() 处理 */ }
   }
 
-  /* ---------- 健康统计 ---------- */
+  /* ================= 健康统计 ================= */
   function renderStats(s) {
     $('stDb').textContent = 'paradedb';
     $('stDbDot').className = 'dot ok';
@@ -60,7 +79,7 @@
     return '<div class="vital"><div class="v">' + v + '</div><div class="l">' + label + '</div></div>';
   }
 
-  /* ---------- 检索测试台 ---------- */
+  /* ================= 检索测试台（签名元素：双通道 → RRF） ================= */
   $('searchBtn').addEventListener('click', doSearch);
   $('searchInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSearch(); });
   async function doSearch() {
@@ -75,13 +94,12 @@
       });
       renderSearch(data);
     } catch (e) {
-      $('vecHits').innerHTML = bm25Err();
+      $('vecHits').innerHTML = '<div class="channel-off">通道不可用</div>';
       $('searchSub').textContent = '检索失败: ' + e.message;
     } finally {
       btn.disabled = false; btn.textContent = '执行检索';
     }
   }
-  function bm25Err() { return '<div class="channel-off">通道不可用</div>'; }
 
   function renderSearch(data) {
     $('searchSub').textContent = 'pgvector HNSW ⇄ ParadeDB BM25 → RRF · 耗时 ' + data.elapsed_ms + 'ms · 向量模式 ' + data.vector_mode;
@@ -125,34 +143,95 @@
   }
   function emptyHits() { return '<div class="channel-off">本通道无命中</div>'; }
 
-  /* ---------- 文档列表 ---------- */
-  $('docSource').addEventListener('change', loadDocuments);
-  async function loadDocuments() {
-    const source = $('docSource').value;
-    $('docSecTitle').textContent = '知识库 · ' + (source === 'tutorials' ? '教程库' : '社区设定');
-    try {
-      const data = await api('/api/documents?source=' + source + '&page=1&page_size=8');
-      const tbody = $('docTbody');
-      if (!data.items.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="table-empty">知识库暂无文档 — 在 Discord 端提交教程/设定后此处展示</td></tr>';
-        return;
+  /* ================= 文档库视图（教程库 / 社区设定 共用组件） ================= */
+  function createDocView(source, prefix) {
+    const state = { page: 1, pageSize: 10, q: '', total: 0 };
+    const tbody = $('tbody-' + prefix), pager = $('pager-' + prefix), sub = $('sub-' + prefix);
+
+    async function refresh(page) {
+      if (page) state.page = page;
+      tbody.innerHTML = '<tr><td colspan="5" class="table-empty">加载中…</td></tr>';
+      try {
+        const data = await api('/api/documents?source=' + source
+          + '&page=' + state.page + '&page_size=' + state.pageSize
+          + (state.q ? '&q=' + encodeURIComponent(state.q) : ''));
+        state.total = data.total;
+        const totalPages = Math.max(1, Math.ceil(data.total / state.pageSize));
+        sub.textContent = '共 ' + data.total + ' 篇 · 第 ' + data.page + ' / ' + totalPages + ' 页';
+        if (!data.items.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="table-empty">没有匹配的文档</td></tr>';
+          pager.innerHTML = '';
+          return;
+        }
+        tbody.innerHTML = data.items.map(function (d) {
+          return '<tr class="row-click" data-id="' + d.id + '">'
+            + '<td class="doc-id">' + (source === 'tutorials' ? 'T-' : 'C-') + d.id + '</td>'
+            + '<td class="doc-title">' + esc(d.title || '（无标题）') + '</td>'
+            + '<td>' + (d.category ? '<span class="tag chip-db">' + esc(d.category) + '</span>' : '—') + '</td>'
+            + '<td>' + d.chunk_count + '</td>'
+            + '<td class="state-ok">' + fmtTime(d.updated_at) + '</td></tr>';
+        }).join('');
+        tbody.querySelectorAll('tr').forEach(function (tr) {
+          tr.addEventListener('click', function () { openDoc(source, Number(tr.dataset.id)); });
+        });
+        renderPager(data.page, totalPages);
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="5" class="table-empty">加载失败: ' + esc(e.message) + '</td></tr>';
       }
-      tbody.innerHTML = data.items.map(function (d) {
-        return '<tr><td class="doc-id">' + (source === 'tutorials' ? 'T-' : 'C-') + d.id + '</td>'
-          + '<td class="doc-title">' + esc(d.title || '（无标题）') + '</td>'
-          + '<td>' + (d.category ? '<span class="tag chip-db">' + esc(d.category) + '</span>' : '—') + '</td>'
-          + '<td>' + d.chunk_count + '</td>'
-          + '<td class="state-ok">' + fmtTime(d.updated_at) + '</td></tr>';
-      }).join('');
+    }
+
+    function renderPager(page, totalPages) {
+      if (totalPages <= 1) { pager.innerHTML = ''; return; }
+      pager.innerHTML = ''
+        + '<button id="' + prefix + '-prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>'
+        + '<span>第 ' + page + ' / ' + totalPages + ' 页</span>'
+        + '<button id="' + prefix + '-next"' + (page >= totalPages ? ' disabled' : '') + '>下一页</button>';
+      $('' + prefix + '-prev').addEventListener('click', function () { refresh(page - 1); });
+      $('' + prefix + '-next').addEventListener('click', function () { refresh(page + 1); });
+    }
+
+    $('q-' + prefix).addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { state.q = $('q-' + prefix).value.trim(); refresh(1); }
+    });
+    $('reload-' + prefix).addEventListener('click', function () {
+      state.q = $('q-' + prefix).value.trim(); refresh(1);
+    });
+
+    return { refresh: function () { refresh(state.page || 1); } };
+  }
+  const docViews = {
+    tutorials: createDocView('tutorials', 'tutorials'),
+    settings: createDocView('community_settings', 'settings'),
+  };
+
+  /* ================= 文档详情弹层 ================= */
+  async function openDoc(source, id) {
+    try {
+      const d = await api('/api/documents/' + source + '/' + id);
+      $('dmTitle').textContent = (source === 'tutorials' ? 'T-' : 'C-') + d.id + ' ' + (d.title || '（无标题）');
+      const cat = d.category ? '<span>分类 ' + esc(d.category) + '</span>' : '';
+      const author = d.author ? '<span>作者 ' + esc(d.author) + '</span>' : '';
+      const link = d.source_url ? '<a href="' + esc(d.source_url) + '" target="_blank" rel="noopener">原始链接</a>' : '';
+      $('dmMeta').innerHTML = cat + author + link
+        + '<span>' + (d.chunks ? d.chunks.length : 0) + ' 个分块</span>'
+        + '<span>更新于 ' + fmtTime(d.updated_at) + '</span>';
+      $('dmFulltext').textContent = d.full_text || '';
+      $('dmChunks').innerHTML = (d.chunks || []).map(function (c) {
+        return '<div class="chunk"><span class="idx">#' + (c.chunk_index != null ? c.chunk_index : '?') + ' · id ' + c.id + '</span>' + esc(c.chunk_text) + '</div>';
+      }).join('') || '<div class="table-empty">无分块</div>';
+      $('docModal').classList.remove('hidden');
     } catch (e) {
-      $('docTbody').innerHTML = '<tr><td colspan="5" class="table-empty">加载失败: ' + esc(e.message) + '</td></tr>';
+      alert('加载文档详情失败: ' + e.message);
     }
   }
+  $('dmClose').addEventListener('click', closeDoc);
+  $('docModal').addEventListener('click', function (e) { if (e.target === this) closeDoc(); });
+  function closeDoc() { $('docModal').classList.add('hidden'); }
 
-  /* ---------- 审核队列 ---------- */
+  /* ================= 审核队列视图 ================= */
   async function loadReview() {
     try {
-      const data = await api('/api/review/pending?page=1&page_size=6');
+      const data = await api('/api/review/pending?page=1&page_size=12');
       const grid = $('reviewGrid');
       if (!data.items.length) {
         grid.innerHTML = '<div class="review-empty">队列为空 — 社区设定提交经 Discord 投票后在此处理</div>';
@@ -189,7 +268,7 @@
     }
   }
 
-  /* ---------- 问答演示 ---------- */
+  /* ================= 问答演示 ================= */
   const chatHistory = [];
   $('chatSend').addEventListener('click', sendChat);
   $('chatInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChat(); });
@@ -249,7 +328,7 @@
     });
   }
 
-  /* ---------- 工具 ---------- */
+  /* ================= 工具 ================= */
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
