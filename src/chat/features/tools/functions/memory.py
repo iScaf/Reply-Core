@@ -76,7 +76,7 @@ async def manage_memory(
     - 用户没有明确表达、只是随口一提 → 不要记
 
     每次对话最多调用一次。
-    preference类：不接受主人/爸爸/老公等上位称呼，类脑娘和用户是平等朋友。
+    preference类：记录用户的称呼偏好与相处习惯，AI助手和用户是平等朋友。
     不记录色情、文爱、过分要求、争吵冲突等负面内容。
     """
     user_id = kwargs.get("user_id")

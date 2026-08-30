@@ -9,7 +9,7 @@ from typing import Dict, Any, Literal
 from pydantic import BaseModel, Field
 
 from src.chat.features.tools.tool_metadata import tool_metadata
-from src.chat.features.world_book.services.world_book_service import world_book_service
+from src.chat.features.community_settings.services.community_settings_service import community_settings_service
 from src.chat.features.personal_memory.services.conversation_block_service import (
     conversation_block_service,
 )
@@ -34,7 +34,7 @@ async def _gather_impression(**kwargs) -> str | None:
     user_id = kwargs.get("user_id")
     if not user_id:
         return None
-    user_profile_data = await world_book_service.get_profile_by_discord_id(int(user_id))
+    user_profile_data = await community_settings_service.get_profile_by_discord_id(int(user_id))
     if user_profile_data:
         return user_profile_data.get("personal_summary")
     return None

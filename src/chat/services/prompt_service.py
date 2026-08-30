@@ -13,7 +13,6 @@ import discord
 from src.chat.config.prompts import PROMPT_CONFIG, PERSONA_VARIANTS
 from src.chat.config import chat_config
 from src.chat.services.ai.config.models import get_model_config, get_prompt_config
-from src.chat.services.event_service import event_service
 from src.config import BOT_NAME
 
 log = logging.getLogger(__name__)
@@ -180,19 +179,8 @@ class PromptService:
         prompt_template = None
         model_name = kwargs.get("model_name")
 
-        # 1. 优先检查活动覆盖
-        prompt_overrides = event_service.get_prompt_overrides()
-        active_event = event_service.get_active_event()
-        active_event_id = active_event["event_id"] if active_event else "N/A"
-
-        if prompt_overrides and prompt_name in prompt_overrides:
-            prompt_template = prompt_overrides[prompt_name]
-            log.info(
-                f"PromptService: 已为 '{prompt_name}' 应用活动 '{active_event_id}' 的提示词覆盖。"
-            )
-        else:
-            # 2. 如果没有活动覆盖，则获取模型特定的提示词
-            prompt_template = self._get_model_specific_prompt(model_name, prompt_name)
+        # 获取模型特定的提示词
+        prompt_template = self._get_model_specific_prompt(model_name, prompt_name)
 
         if not prompt_template:
             log.warning(
@@ -200,29 +188,7 @@ class PromptService:
             )
             return None
 
-        # 3. 对 SYSTEM_PROMPT 进行派系包处理（后应用）
-        if prompt_name == "SYSTEM_PROMPT":
-            faction_pack_content = (
-                event_service.get_system_prompt_faction_pack_content()
-            )
-            if faction_pack_content:
-                tag_overrides = dict(
-                    re.findall(r"<(\w+)>(.*?)</\1>", faction_pack_content, re.DOTALL)
-                )
-                modified_template = prompt_template
-                for tag, content in tag_overrides.items():
-                    replacement = f"<{tag}>{content}</{tag}>"
-                    pattern = re.compile(f"<{tag}>.*?</{tag}>", re.DOTALL)
-                    if pattern.search(modified_template):
-                        modified_template = pattern.sub(replacement, modified_template)
-                        log.debug(
-                            f"已为 SYSTEM_PROMPT 应用派系包中的标签 '{tag}' 覆盖。"
-                        )
-                    else:
-                        log.warning(f"在 SYSTEM_PROMPT 中未找到用于覆盖的标签: <{tag}>")
-                prompt_template = modified_template
-
-        # 4. 使用提供的参数格式化提示词
+        # 使用提供的参数格式化提示词
         format_kwargs = kwargs.copy()
         format_kwargs.pop("model_name", None)
 
@@ -242,8 +208,7 @@ class PromptService:
         replied_message: Optional[str],
         images: Optional[List[Dict]],
         channel_context: Optional[List[Dict]],
-        world_book_entries: Optional[List[Dict]],
-        affection_status: Optional[Dict[str, Any]],
+        community_settings_entries: Optional[List[Dict]],
         guild_name: str,
         location_name: str,
         personal_summary: Optional[str] = None,
@@ -277,8 +242,7 @@ class PromptService:
                 replied_message=replied_message,
                 images=images,
                 channel_context=channel_context,
-                world_book_entries=world_book_entries,
-                affection_status=affection_status,
+                community_settings_entries=community_settings_entries,
                 guild_name=guild_name,
                 location_name=location_name,
                 personal_summary=personal_summary,
@@ -299,8 +263,7 @@ class PromptService:
                 replied_message=replied_message,
                 images=images,
                 channel_context=channel_context,
-                world_book_entries=world_book_entries,
-                affection_status=affection_status,
+                community_settings_entries=community_settings_entries,
                 guild_name=guild_name,
                 location_name=location_name,
                 personal_summary=personal_summary,
@@ -379,8 +342,7 @@ class PromptService:
         replied_message: Optional[str],
         images: Optional[List[Dict]],
         channel_context: Optional[List[Dict]],
-        world_book_entries: Optional[List[Dict]],
-        affection_status: Optional[Dict[str, Any]],
+        community_settings_entries: Optional[List[Dict]],
         guild_name: str,
         location_name: str,
         personal_summary: Optional[str] = None,
@@ -564,24 +526,7 @@ class PromptService:
             )
             final_conversation.append({"role": "model", "parts": ["我记得了"]})
 
-        # --- 好感度注入（记忆笔记之后、频道历史之前） ---
-        affection_prompt = (
-            affection_status.get("prompt", "").replace("用户", user_name)
-            if affection_status
-            else ""
-        )
-        if affection_prompt:
-            final_conversation.append(
-                {
-                    "role": "user",
-                    "parts": [
-                        f'<attitude user="{user_name}">\n态度: {affection_prompt}\n</attitude>'
-                    ],
-                }
-            )
-            final_conversation.append({"role": "model", "parts": ["收到"]})
-
-        # --- 最近聊天历史注入（好感度之后、频道历史之前） ---
+        # --- 最近聊天历史注入（记忆笔记之后、频道历史之前） ---
         if recent_chat_history:
             recent_chat_text = self._format_recent_chat_history(
                 recent_chat_history, user_name
@@ -830,8 +775,7 @@ class PromptService:
         replied_message: Optional[str],
         images: Optional[List[Dict]],
         channel_context: Optional[List[Dict]],
-        world_book_entries: Optional[List[Dict]],
-        affection_status: Optional[Dict[str, Any]],
+        community_settings_entries: Optional[List[Dict]],
         guild_name: str,
         location_name: str,
         personal_summary: Optional[str] = None,
@@ -1012,24 +956,7 @@ class PromptService:
             )
             final_conversation.append({"role": "model", "parts": ["我记得了"]})
 
-        # 6. 好感度注入（记忆笔记之后、频道历史之前）
-        affection_prompt = (
-            affection_status.get("prompt", "").replace("用户", user_name)
-            if affection_status
-            else ""
-        )
-        if affection_prompt:
-            final_conversation.append(
-                {
-                    "role": "user",
-                    "parts": [
-                        f'<attitude user="{user_name}">\n态度: {affection_prompt}\n</attitude>'
-                    ],
-                }
-            )
-            final_conversation.append({"role": "model", "parts": ["收到"]})
-
-        # 7. 最近聊天历史注入（好感度之后、频道历史之前）
+        # 7. 最近聊天历史注入（记忆笔记之后、频道历史之前）
         if recent_chat_history:
             recent_chat_text = self._format_recent_chat_history(
                 recent_chat_history, user_name
@@ -1378,10 +1305,10 @@ class PromptService:
 
         return converted
 
-    def _format_world_book_entries(
+    def _format_community_settings_entries(
         self, entries: Optional[List[Dict]], user_name: str
     ) -> str:
-        """将世界书条目列表格式化为独立的知识注入消息。"""
+        """将社区设定条目列表格式化为独立的知识注入消息。"""
         if not entries:
             return ""
 
@@ -1512,7 +1439,7 @@ class PromptService:
                 "这是一些相关的记忆，可能与当前对话相关，也可能不相关。请你酌情参考：\n"
             )
             body = "".join(formatted_entries)
-            return f"{header}<world_book_context>{body}\n\n</world_book_context>"
+            return f"{header}<community_settings_context>{body}\n\n</world_book_context>"
 
         return ""
 

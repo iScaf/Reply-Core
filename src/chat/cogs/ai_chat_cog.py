@@ -19,7 +19,6 @@ from src.chat.features.tools.functions.summarize_channel import text_to_summary_
 from src.chat.utils.database import chat_db_manager
 from src.chat.config.chat_config import CHAT_ENABLED, MESSAGE_SETTINGS
 from src.chat.config import chat_config
-from src.chat.features.odysseia_coin.service.coin_service import coin_service
 from src.chat.utils.message_utils import safe_reply, safe_send
 from src.chat.features.content_filter.services.content_filter_service import (
     get_all_keywords,
@@ -100,18 +99,6 @@ class AIChatCog(commands.Cog):
                     processed_data["user_content"], matched, "用户输入"
                 )
             )
-
-        # 检查是否在帖子中，以及帖子创建者是否禁用了回复
-        if isinstance(message.channel, discord.Thread):
-            # 检查帖子的创建者
-            thread_owner = message.channel.owner
-            if thread_owner and await coin_service.blocks_thread_replies(
-                thread_owner.id
-            ):
-                log.info(
-                    f"帖子 '{message.channel.name}' 的创建者 {thread_owner.id} 已禁用回复，跳过消息处理。"
-                )
-                return
 
         # 黑名单检查
         if await chat_db_manager.is_user_globally_blacklisted(message.author.id):

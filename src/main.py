@@ -1,16 +1,10 @@
 import os
 import asyncio
 import logging
-import queue
 import sys
 import discord
-import time
-import requests
 from discord.ext import commands
 from dotenv import load_dotenv
-from datetime import datetime, timezone
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from src.backup.backup_manager import backup_databases
 
 # 在所有其他导入之前，尽早加载环境变量
 # 这样可以确保所有模块在加载时都能访问到 .env 文件中定义的配置
@@ -19,9 +13,6 @@ load_dotenv()
 # 从我们自己的模块中导入
 from src import config
 from src.chat.utils.database import chat_db_manager
-from src.chat.features.world_book.database.world_book_db_manager import (
-    world_book_db_manager,
-)
 
 # 3.6. 导入并注册所有 AI 工具
 # 这是一个关键步骤。通过在这里导入工具模块，我们可以确保
@@ -32,7 +23,6 @@ from src.chat.features.world_book.database.world_book_db_manager import (
 # 导入全局 ai_service 实例
 from src.chat.services.ai.service import ai_service
 from src.chat.services.review_service import initialize_review_service
-from src.chat.features.work_game.services.work_db_service import WorkDBService
 from src.chat.utils.command_sync import sync_commands
 from src.chat.config import chat_config
 
@@ -41,54 +31,6 @@ current_dir = os.path.dirname(current_script_path)
 parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
-
-# --- WebUI_start ---
-log_server_url = "http://config_web:80/api/log"
-heartbeat_interval = 1.0  # 心跳包间隔
-
-log_queue = queue.Queue()
-
-
-class QueueHandler(logging.Handler):
-    def __init__(self, log_queue):
-        super().__init__()
-        self.log_queue = log_queue
-
-    def emit(self, record):
-        self.log_queue.put(self.format(record))  # 格式化后入列
-
-
-def heartbeat_sender():
-    while 1:
-        time.sleep(heartbeat_interval)
-        logs_to_send = []
-        while not log_queue.empty():
-            try:
-                logs_to_send.append(log_queue.get_nowait())
-            except queue.Empty:
-                break
-
-        try:
-            payload = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "logs": logs_to_send,
-            }
-            response = requests.post(log_server_url, json=payload, timeout=2.0)
-            if response.status_code != 200:
-                print(
-                    f"Heartbeat Error: Received status {response.status_code}",
-                    file=sys.stderr,
-                )  # 不适用logging
-
-        except requests.exceptions.RequestException as e:
-            print(
-                f"Heartbeat Error: Could not connet to {log_server_url}.\nDetail:{e}",
-                file=sys.stderr,
-            )
-
-
-# --- WebUI_end ---
-
 
 if sys.platform != "win32":
     try:
@@ -148,24 +90,10 @@ def setup_logging():
     file_handler.setLevel(logging.DEBUG)  # 文件记录 DEBUG 级别
     file_handler.setFormatter(log_formatter)
 
-    # --- webui ---
-    web_log_formatter = logging.Formatter(
-        "[%(asctime)s.%(msecs)03dZ] [%(levelname)s] [%(name)s] %(message)s",
-        datefmt="%Y-%m-%dT%H:%M:%S",
-    )
-    logging.Formatter.converter = time.gmtime
-
-    # queue_handler = QueueHandler(log_queue)
-    # queue_handler.setLevel(
-    #     logging.DEBUG
-    # )  # 这里如果想在WebUI看到仅INFO以上日志，请在这里修改
-    # queue_handler.setFormatter(web_log_formatter)
-
     # 6. 为根 logger 添加所有处理器
     root_logger.addHandler(stdout_handler)
     root_logger.addHandler(stderr_handler)
     root_logger.addHandler(file_handler)
-    # root_logger.addHandler(queue_handler) # 禁用未使用的WebUI日志队列处理器，防止内存泄漏
 
     # 5. 调整特定库的日志级别，以减少不必要的输出
     #    例如，google-generativeai 库在 INFO 级别会打印很多网络请求相关的日志
@@ -415,35 +343,12 @@ async def main():
     except Exception as e:
         log.error(f"设置 asyncio 异常处理器失败: {e}", exc_info=True)
 
-    # --- webui心跳启动进程 --
-    # log.info("启用webui心跳包")
-    # sender_thread = threading.Thread(target=heartbeat_sender,daemon=True)
-    # sender_thread.start()
-    # log.info("Webui心跳包已启用")
-
     # 3. 异步初始化数据库
     log.info("正在异步初始化数据库...")
     log.info("初始化 Chat 数据库...")
     await chat_db_manager.init_async()
 
-    log.info("初始化 World Book 数据库...")
-    await world_book_db_manager.init_async()
-
-    # 3.5. 初始化商店商品
-    # 商品已迁移到PostgreSQL，不再需要从配置文件初始化
-    # from src.chat.features.odysseia_coin.service.coin_service import (
-    #     _setup_initial_items,
-    # )
-    # await _setup_initial_items()
-    # log.info("已初始化商店商品。")
-
     log.info("已加载并注册 AI 工具。")
-
-    # 启动定时备份任务
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(backup_databases, "cron", hour=0, minute=0)
-    scheduler.start()
-    log.info("已启动每日数据库备份任务。")
 
     # 4. 创建并运行机器人实例
     bot = DiscordBot()
@@ -468,17 +373,12 @@ async def main():
     # 异步初始化 AI Service（从 PG 数据库加载 Provider 和 Model 配置）
     await ai_service.initialize()
 
-    from src.chat.services.gpt_image_service import gpt_image_service
-    await gpt_image_service.initialize()
-
     # 为 context_service_test 注入 bot 实例，使其能够访问缓存
     from src.chat.services.context_service_test import initialize_context_service_test
 
     initialize_context_service_test(bot)
-    # 初始化所有需要的服务实例
-    work_db_service = WorkDBService()
-    # 初始化审核服务，并将 bot 和其他服务实例注入
-    initialize_review_service(bot, work_db_service)
+    # 初始化审核服务，并将 bot 实例注入
+    initialize_review_service(bot)
 
     token = os.getenv("DISCORD_TOKEN")
     if not token:

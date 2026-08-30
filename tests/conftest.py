@@ -28,20 +28,44 @@ if not _TEST_DATABASE_URL:
 _test_engine = create_async_engine(_TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 _TestSessionFactory = async_sessionmaker(_test_engine, expire_on_commit=False)
 
-ECONOMY_TABLES = [
-    "economy.user_coins",
-    "economy.coin_transactions",
-    "economy.coin_loans",
-    "economy.interaction_logs",
+# bot schema：原遗留 SQLite chat.db 迁移过来的 Bot 运行时表
+BOT_TABLES = [
+    "bot.global_settings",
+    "bot.blacklisted_users",
+    "bot.globally_blacklisted_users",
+    "bot.global_chat_config",
+    "bot.channel_chat_config",
+    "bot.user_channel_cooldown",
+    "bot.user_channel_timestamps",
+    "bot.muted_channels",
+    "bot.ai_prompts",
+    "bot.channel_memory_anchors",
+    "bot.ai_model_usage",
+    "bot.daily_model_usage",
+    "bot.daily_stats",
 ]
 
+# user schema：警告记录与用户人设偏好
 USER_TABLES = [
-    "user.user_affection",
     "user.user_warnings",
     "user.user_persona_preference",
 ]
 
-_ALL_TABLES = ECONOMY_TABLES + USER_TABLES
+# community_settings schema：待审核条目队列。
+# 注意：documents / chunks 是知识库主数据，community.member_profiles 是个人记忆
+# 载体，均不在全局清空之列；相关测试需在用例内做定向清理（见
+# test_community_settings_service_pg.py）。
+COMMUNITY_SETTINGS_TABLES = [
+    "community_settings.pending_entries",
+]
+
+# forum schema：论坛索引处理状态
+FORUM_TABLES = [
+    "forum.processed_threads",
+    "forum.backfill_status",
+]
+
+_ALL_TABLES = BOT_TABLES + USER_TABLES + COMMUNITY_SETTINGS_TABLES + FORUM_TABLES
 
 
 async def _truncate_all():
@@ -69,71 +93,3 @@ async def clean_tables():
     await _truncate_all()
     yield
     await _truncate_all()
-
-
-@pytest.fixture
-def coin_svc():
-    from src.chat.features.odysseia_coin.service.coin_service import CoinService
-
-    return CoinService()
-
-
-@pytest.fixture
-def aff_svc():
-    from unittest.mock import patch, MagicMock
-
-    mock_levels = [
-        {
-            "id": "lv0",
-            "min_affection": 0,
-            "max_affection": 19,
-            "level_name": "陌生",
-            "prompt": "...",
-        },
-        {
-            "id": "lv1",
-            "min_affection": 20,
-            "max_affection": 49,
-            "level_name": "熟悉",
-            "prompt": "...",
-        },
-        {
-            "id": "lv2",
-            "min_affection": 50,
-            "max_affection": 99,
-            "level_name": "亲密",
-            "prompt": "...",
-        },
-    ]
-
-    with (
-        patch("builtins.open", MagicMock()),
-        patch("yaml.safe_load", return_value=mock_levels),
-    ):
-        from src.chat.features.affection.service.affection_service import (
-            AffectionService,
-        )
-
-        svc = AffectionService()
-        svc.affection_levels = mock_levels
-        return svc
-
-
-@pytest.fixture
-def feeding_svc():
-    from unittest.mock import AsyncMock
-    from src.chat.features.affection.service.feeding_service import FeedingService
-
-    svc = FeedingService()
-    svc.db_manager = AsyncMock()
-    return svc
-
-
-@pytest.fixture
-def confession_svc():
-    from unittest.mock import AsyncMock
-    from src.chat.features.affection.service.confession_service import ConfessionService
-
-    svc = ConfessionService()
-    svc.db_manager = AsyncMock()
-    return svc

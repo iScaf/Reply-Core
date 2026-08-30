@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
+"""论坛帖子的实时索引与每日历史回溯（同步进度存 PostgreSQL）。"""
 
 import logging
 import discord
 from discord.ext import commands, tasks
-import aiosqlite
-import os
 import datetime
 import asyncio
+
+from sqlalchemy import select
 
 from src.chat.config import chat_config
 from src.chat.features.forum_search.services.forum_search_service import (
     forum_search_service,
 )
-from src import config as main_config
+from src.database.database import AsyncSessionLocal
+from src.database.models import ForumProcessedThread, ForumBackfillStatus
 
 log = logging.getLogger(__name__)
-
-DB_PATH = os.path.join(main_config.DATA_DIR, "forum_sync_status.db")
 
 
 class ForumSyncCog(commands.Cog):
@@ -26,53 +26,67 @@ class ForumSyncCog(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db_path = DB_PATH
         # 用于在内存中缓存回溯进度，避免重复DB查询
         self.backfill_bookmarks = {}
         self.poll_threads.start()
 
     async def cog_load(self):
         """Cog加载时执行初始化，并从数据库恢复回溯书签。"""
-        await self.initialize_db()
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")  # 开启 WAL 模式增强稳定性
-            cursor = await db.execute(
-                "SELECT channel_id, oldest_known_timestamp, is_complete FROM backfill_status"
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(
+                    ForumBackfillStatus.channel_id,
+                    ForumBackfillStatus.oldest_known_timestamp,
+                    ForumBackfillStatus.is_complete,
+                )
             )
-            rows = await cursor.fetchall()
-            for row in rows:
-                self.backfill_bookmarks[row[0]] = {
-                    "timestamp": row[1],
-                    "is_complete": bool(row[2]),
+            for channel_id, oldest_ts, is_complete in result.all():
+                self.backfill_bookmarks[channel_id] = {
+                    "timestamp": oldest_ts,
+                    "is_complete": bool(is_complete),
                 }
-            if self.backfill_bookmarks:
-                log.info(
-                    f"已从数据库恢复 {len(self.backfill_bookmarks)} 个频道的回溯书签。"
-                )
+        if self.backfill_bookmarks:
+            log.info(
+                f"已从数据库恢复 {len(self.backfill_bookmarks)} 个频道的回溯书签。"
+            )
 
-    async def initialize_db(self):
-        """初始化数据库，创建所需的数据表。"""
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
-            # 表1: 存储已处理的帖子ID，用于避免重复处理
-            await db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS processed_threads (
-                    thread_id INTEGER PRIMARY KEY
+    async def _is_thread_processed(self, thread_id: int) -> bool:
+        """检查帖子是否已被处理过。"""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ForumProcessedThread.thread_id).where(
+                    ForumProcessedThread.thread_id == thread_id
                 )
-                """
             )
-            # 表2: 存储每个频道的回溯进度书签
-            await db.execute(
-                """
-                CREATE TABLE IF NOT EXISTS backfill_status (
-                    channel_id INTEGER PRIMARY KEY,
-                    oldest_known_timestamp TEXT,
-                    is_complete INTEGER DEFAULT 0
-                )
-                """
+            return result.scalar_one_or_none() is not None
+
+    async def _mark_thread_processed(self, thread_id: int) -> None:
+        """记录帖子已处理。"""
+        async with AsyncSessionLocal() as session:
+            session.add(ForumProcessedThread(thread_id=thread_id))
+            await session.commit()
+
+    async def _upsert_backfill_status(
+        self, channel_id: int, timestamp: str | None, is_complete: bool
+    ) -> None:
+        """更新频道回溯书签。"""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        async with AsyncSessionLocal() as session:
+            stmt = pg_insert(ForumBackfillStatus).values(
+                channel_id=channel_id,
+                oldest_known_timestamp=timestamp,
+                is_complete=int(is_complete),
             )
-            await db.commit()
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["channel_id"],
+                set_={
+                    "oldest_known_timestamp": stmt.excluded.oldest_known_timestamp,
+                    "is_complete": stmt.excluded.is_complete,
+                },
+            )
+            await session.execute(stmt)
+            await session.commit()
 
     async def _process_thread_concurrently(
         self, thread: discord.Thread, semaphore: asyncio.Semaphore
@@ -80,24 +94,12 @@ class ForumSyncCog(commands.Cog):
         """并发处理单个帖子的辅助函数"""
         async with semaphore:
             try:
-                # 使用 aiosqlite 连接池来处理并发写入
-                async with aiosqlite.connect(self.db_path) as db:
-                    await db.execute("PRAGMA journal_mode=WAL")
-                    cursor = await db.execute(
-                        "SELECT 1 FROM processed_threads WHERE thread_id = ?",
-                        (thread.id,),
-                    )
-                    if await cursor.fetchone():
-                        return  # 如果已被实时监听处理过，则跳过
+                if await self._is_thread_processed(thread.id):
+                    return  # 如果已被实时监听处理过，则跳过
 
-                    log.info(f"正在回溯处理帖子: {thread.name} ({thread.id})")
-                    await forum_search_service.process_thread(thread)
-
-                    await db.execute(
-                        "INSERT OR IGNORE INTO processed_threads (thread_id) VALUES (?)",
-                        (thread.id,),
-                    )
-                    await db.commit()
+                log.info(f"正在回溯处理帖子: {thread.name} ({thread.id})")
+                await forum_search_service.process_thread(thread)
+                await self._mark_thread_processed(thread.id)
             except Exception as e:
                 log.error(
                     f"并发处理帖子 {thread.name} ({thread.id}) 时出错: {e}",
@@ -175,13 +177,9 @@ class ForumSyncCog(commands.Cog):
                         "timestamp": bookmark.get("timestamp"),
                         "is_complete": True,
                     }
-                    async with aiosqlite.connect(self.db_path) as db:
-                        await db.execute("PRAGMA journal_mode=WAL")
-                        await db.execute(
-                            "INSERT OR REPLACE INTO backfill_status (channel_id, oldest_known_timestamp, is_complete) VALUES (?, ?, 1)",
-                            (channel_id, bookmark.get("timestamp")),
-                        )
-                        await db.commit()
+                    await self._upsert_backfill_status(
+                        channel_id, bookmark.get("timestamp"), True
+                    )
                     continue
 
                 # 3. 并发处理这批帖子
@@ -198,12 +196,10 @@ class ForumSyncCog(commands.Cog):
                     t for t in threads_to_process if t.created_at is not None
                 ]
                 if valid_threads:
-                    # 使用类型断言，因为我们已经过滤了 None 值
                     new_oldest_thread = min(
                         valid_threads,
                         key=lambda t: t.created_at or datetime.datetime.utcnow(),
                     )
-                    # new_oldest_thread.created_at 可能是 None，需要处理
                     new_bookmark_ts = (
                         new_oldest_thread.created_at.isoformat()
                         if new_oldest_thread.created_at
@@ -216,13 +212,7 @@ class ForumSyncCog(commands.Cog):
                     "timestamp": new_bookmark_ts,
                     "is_complete": False,
                 }
-                async with aiosqlite.connect(self.db_path) as db:
-                    await db.execute("PRAGMA journal_mode=WAL")
-                    await db.execute(
-                        "INSERT OR REPLACE INTO backfill_status (channel_id, oldest_known_timestamp, is_complete) VALUES (?, ?, 0)",
-                        (channel_id, new_bookmark_ts),
-                    )
-                    await db.commit()
+                await self._upsert_backfill_status(channel_id, new_bookmark_ts, False)
                 log.info(f"频道 {channel.name} 的回溯书签已更新为: {new_bookmark_ts}")
 
             except Exception as e:
@@ -251,13 +241,7 @@ class ForumSyncCog(commands.Cog):
             )
             await forum_search_service.process_thread(thread)
             # 将新帖子ID添加到数据库，以防轮询任务重复处理
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("PRAGMA journal_mode=WAL")
-                await db.execute(
-                    "INSERT OR IGNORE INTO processed_threads (thread_id) VALUES (?)",
-                    (thread.id,),
-                )
-                await db.commit()
+            await self._mark_thread_processed(thread.id)
             log.info(f"[ForumSyncCog] 帖子 {thread.id} 已成功处理并记录。")
         except Exception as e:
             log.error(

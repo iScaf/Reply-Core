@@ -15,7 +15,7 @@ from src.chat.features.forum_search.services.forum_search_service import (
 from src.chat.features.tutorial_search.services.tutorial_search_service import (
     tutorial_search_service,
 )
-from src.chat.features.world_book.services.world_book_service import world_book_service
+from src.chat.features.community_settings.services.community_settings_service import community_settings_service
 from src.chat.features.personal_memory.services.conversation_block_service import (
     conversation_block_service,
 )
@@ -69,12 +69,12 @@ class SearchParams(BaseModel):
         ...,
         description="搜索关键词。",
     )
-    scope: Literal["forum", "channel", "tutorial", "world_book", "memory"] = Field(
+    scope: Literal["forum", "channel", "tutorial", "community_settings", "memory"] = Field(
         description=(
             "搜索范围："
             "forum=论坛帖子, channel=服务器消息历史, tutorial=教程知识库, "
-            "world_book=社区成员名片和社区知识, memory=与当前用户的历史对话记忆。"
-            "遇到不熟悉的名词、角色、设定或任何不确定的信息时，应优先使用 world_book 搜索。"
+            "community_settings=社区设定知识库(社区信息/文化/俚语/通用知识), memory=与当前用户的历史对话记忆。"
+            "遇到不熟悉的名词、设定或任何不确定的信息时，应优先使用 community_settings 搜索。"
         ),
     )
     category_name: Optional[CategoryName] = Field(
@@ -325,7 +325,7 @@ async def _search_tutorial(params: SearchParams, **kwargs) -> Dict[str, Any]:
     return {"results": formatted_context}
 
 
-async def _search_world_book(params: SearchParams, **kwargs) -> Dict[str, Any]:
+async def _search_community_settings(params: SearchParams, **kwargs) -> Dict[str, Any]:
     query = params.query
     if not query or not query.strip():
         return {"results": [], "error": "社区知识搜索需要提供关键词。"}
@@ -338,10 +338,10 @@ async def _search_world_book(params: SearchParams, **kwargs) -> Dict[str, Any]:
     user_name = kwargs.get("user_name", "用户")
     channel_context = kwargs.get("channel_context")
 
-    if not world_book_service.is_ready():
+    if not community_settings_service.is_ready():
         return {"results": [], "error": "社区知识搜索服务当前不可用，请稍后再试。"}
 
-    entries = await world_book_service.find_entries(
+    entries = await community_settings_service.find_entries(
         latest_query=query,
         user_id=int(user_id),
         guild_id=int(guild_id),
@@ -350,7 +350,7 @@ async def _search_world_book(params: SearchParams, **kwargs) -> Dict[str, Any]:
     )
 
     if entries:
-        formatted = prompt_service._format_world_book_entries(entries, user_name)
+        formatted = prompt_service._format_community_settings_entries(entries, user_name)
         return {"results": formatted}
     return {"results": []}
 
@@ -399,7 +399,7 @@ async def search(
     - "forum": 仅搜索论坛帖子
     - "channel": 仅搜索服务器消息历史
     - "tutorial": 仅搜索教程知识库
-    - "world_book": 搜索社区成员名片、其他用户资料和社区知识。当你遇到任何不熟悉的名词、角色、设定或不确定的信息时，应优先搜索 world_book，它可能包含你需要的答案。
+    - "community_settings": 搜索社区设定知识库（社区信息、文化、俚语、通用知识）。当你遇到任何不熟悉的名词、设定或不确定的信息时，应优先搜索 community_settings，它可能包含你需要的答案。
     - "memory": 搜索与当前用户的历史对话记忆
 
     返回格式：字典，每个数据源一个键，值为该源的搜索结果。
@@ -409,7 +409,7 @@ async def search(
       你在最终回复时，必须原样输出帖子链接和分类名，不要对链接进行任何再加工、转换或添加Markdown格式。
     - channel: {"results": [{"id": "...", "author": "...", "content": "...", "timestamp": "..."}]}
     - tutorial: {"results": "格式化后的教程文本"}
-    - world_book: {"results": "格式化后的社区知识内容"}
+    - community_settings: {"results": "格式化后的社区设定内容"}
     - memory: {"results": "格式化后的历史对话记忆"}
     """
     query = params.query
@@ -430,8 +430,8 @@ async def search(
         tasks["channel"] = _search_channel(params, **kwargs)
     if "tutorial" in sources:
         tasks["tutorial"] = _search_tutorial(params, **kwargs)
-    if "world_book" in sources:
-        tasks["world_book"] = _search_world_book(params, **kwargs)
+    if "community_settings" in sources:
+        tasks["community_settings"] = _search_community_settings(params, **kwargs)
     if "memory" in sources:
         tasks["memory"] = _search_memory(params, **kwargs)
 

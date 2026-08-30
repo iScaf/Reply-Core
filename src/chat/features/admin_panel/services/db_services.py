@@ -34,19 +34,6 @@ def get_parade_db_connection() -> Optional[psycopg2.extensions.connection]:
         return None
 
 
-def get_sqlite_connection(db_path: str) -> Optional[sqlite3.Connection]:
-    """
-    为管理面板创建一个同步的 sqlite3 数据库连接。
-    """
-    try:
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except sqlite3.Error as e:
-        log.error(f"连接到数据库 {db_path} 失败: {e}", exc_info=True)
-        return None
-
-
 def get_db_connection(
     db_type: str, db_path: Optional[str] = None
 ) -> Optional[Union[sqlite3.Connection, psycopg2.extensions.connection]]:
@@ -55,10 +42,8 @@ def get_db_connection(
     """
     if db_type == "parade":
         return get_parade_db_connection()
-    elif db_type == "sqlite" and db_path:
-        return get_sqlite_connection(db_path)
     else:
-        log.error(f"无效的数据库类型或缺少路径: db_type={db_type}, db_path={db_path}")
+        log.error(f"无效的数据库类型: db_type={db_type}")
         return None
 
 

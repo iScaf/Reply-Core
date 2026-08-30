@@ -10,7 +10,11 @@ from alembic import context
 
 # Add the project root to the Python path so we can import 'src'
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), "..")))
-load_dotenv()
+
+# 显式加载项目根目录的 .env 并覆盖已有环境变量，避免读到外部环境导致连错库
+_PROJECT_ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
+load_dotenv(os.path.join(_PROJECT_ROOT, ".env"), override=True)
+log_db_name = os.getenv("POSTGRES_DB", "bot_db")
 
 from src.database.models import Base
 

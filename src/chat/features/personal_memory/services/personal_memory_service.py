@@ -5,10 +5,7 @@ from sqlalchemy.future import select
 from sqlalchemy import update
 from src.database.database import AsyncSessionLocal
 from src.database.models import CommunityMemberProfile, ConversationBlock
-from src.chat.config.chat_config import (
-    PROMPT_CONFIG,
-    CONVERSATION_MEMORY_CONFIG,
-)
+from src.chat.config.chat_config import CONVERSATION_MEMORY_CONFIG
 from src.chat.features.personal_memory.services.conversation_block_service import (
     conversation_block_service,
 )

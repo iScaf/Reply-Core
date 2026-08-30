@@ -21,11 +21,9 @@ QWEN_EMBEDDING_DIMENSION = 1024  # qwen3-embedding-0.6B 模型的维度
 
 # --- Schema 名称 ---
 TUTORIALS_SCHEMA = "tutorials"
-GENERAL_KNOWLEDGE_SCHEMA = "general_knowledge"
+COMMUNITY_SETTINGS_SCHEMA = "community_settings"
 COMMUNITY_SCHEMA = "community"
-SHOP_SCHEMA = "shop"
 USER_SCHEMA = "user"
-ECONOMY_SCHEMA = "economy"
 FORUM_SCHEMA = "forum"
 
 Base = declarative_base()
@@ -157,63 +155,63 @@ class ThreadSetting(Base):
         return f"<ThreadSetting(thread_id='{self.thread_id}', search_mode='{self.search_mode}')>"
 
 
-# --- 通用知识库模型 (关联表结构) ---
+# --- 社区设定模型 (关联表结构) ---
 
 
-class GeneralKnowledgeDocument(Base):
+class CommunitySettingDocument(Base):
     """
-    代表一份完整的通用知识文档。
+    代表一份完整的社区设定条目文档。
     存储源信息和元数据，与分块建立一对多关系。
     """
 
-    __tablename__ = "knowledge_documents"
-    __table_args__ = {"schema": GENERAL_KNOWLEDGE_SCHEMA}
+    __tablename__ = "documents"
+    __table_args__ = {"schema": COMMUNITY_SETTINGS_SCHEMA}
 
     id = Column(Integer, primary_key=True)
     external_id = Column(
-        String, unique=True, nullable=False, comment="来自旧系统的唯一ID"
+        String, unique=True, nullable=False, comment="来源系统的唯一ID"
     )
     title = Column(Text, nullable=True)
     full_text = Column(
         Text, nullable=False, comment="完整的文本内容，用于重新分块和BM25搜索"
     )
-    source_metadata = Column(JSON, nullable=True, comment="来自旧系统的完整元数据备份")
+    source_metadata = Column(JSON, nullable=True, comment="完整元数据备份")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     # 与分块的一对多关系
     chunks = relationship(
-        "GeneralKnowledgeChunk", back_populates="document", cascade="all, delete-orphan"
+        "CommunitySettingChunk", back_populates="document", cascade="all, delete-orphan"
     )
 
     def __repr__(self):
-        return f"<GeneralKnowledgeDocument(id={self.id}, title='{self.title}')>"
+        return f"<CommunitySettingDocument(id={self.id}, title='{self.title}')>"
 
 
-class GeneralKnowledgeChunk(Base):
+class CommunitySettingChunk(Base):
     """
-    代表来自 GeneralKnowledgeDocument 的一个文本块，及其对应的向量。
+    代表来自 CommunitySettingDocument 的一个文本块，及其对应的向量。
     我们将在此表上执行向量搜索。
     """
 
-    __tablename__ = "knowledge_chunks"
+    __tablename__ = "chunks"
     __table_args__ = (
         # HNSW 索引用于向量搜索
         Index(
-            "idx_gk_bge_embedding_hnsw",
+            "idx_cs_bge_embedding_hnsw",
             "bge_embedding",
             postgresql_using="hnsw",
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"bge_embedding": "halfvec_cosine_ops"},
         ),
         Index(
-            "idx_gk_qwen_embedding_hnsw",
+            "idx_cs_qwen_embedding_hnsw",
             "qwen_embedding",
             postgresql_using="hnsw",
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"qwen_embedding": "halfvec_cosine_ops"},
         ),
-        {"schema": GENERAL_KNOWLEDGE_SCHEMA},
+        {"schema": COMMUNITY_SETTINGS_SCHEMA},
     )
 
     id = Column(Integer, primary_key=True)
@@ -221,7 +219,7 @@ class GeneralKnowledgeChunk(Base):
     # 链接回父文档的外键
     document_id = Column(
         Integer,
-        ForeignKey(f"{GENERAL_KNOWLEDGE_SCHEMA}.knowledge_documents.id"),
+        ForeignKey(f"{COMMUNITY_SETTINGS_SCHEMA}.documents.id"),
         nullable=False,
     )
 
@@ -230,7 +228,7 @@ class GeneralKnowledgeChunk(Base):
 
     bge_embedding = Column(
         HALFVEC(EMBEDDING_DIMENSION),
-        nullable=False,
+        nullable=True,
         comment="BGE-M3 模型的嵌入向量。",
     )
     qwen_embedding = Column(
@@ -241,11 +239,44 @@ class GeneralKnowledgeChunk(Base):
 
     created_at = Column(DateTime, server_default=func.now())
 
-    # 回到 GeneralKnowledgeDocument 的多对一关系
-    document = relationship("GeneralKnowledgeDocument", back_populates="chunks")
+    # 回到 CommunitySettingDocument 的多对一关系
+    document = relationship("CommunitySettingDocument", back_populates="chunks")
 
     def __repr__(self):
-        return f"<GeneralKnowledgeChunk(id={self.id}, document_id={self.document_id}, chunk_index={self.chunk_index})>"
+        return f"<CommunitySettingChunk(id={self.id}, document_id={self.document_id}, chunk_index={self.chunk_index})>"
+
+
+class CommunitySettingPendingEntry(Base):
+    """
+    社区设定的待审核条目队列。
+    普通用户提交后进入公开投票审核，管理员可直接批准。
+    """
+
+    __tablename__ = "pending_entries"
+    __table_args__ = (
+        Index("ix_cs_pending_status_expires", "status", "expires_at"),
+        {"schema": COMMUNITY_SETTINGS_SCHEMA},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    entry_type = Column(
+        String(50), nullable=False, default="community_setting", comment="条目类型"
+    )
+    data_json = Column(JSON, nullable=False, comment="提交的原始数据")
+    message_id = Column(
+        BigInteger, nullable=False, default=-1, comment="审核投票消息的ID"
+    )
+    channel_id = Column(BigInteger, nullable=False, comment="提交所在频道ID")
+    guild_id = Column(BigInteger, nullable=False, comment="提交所在服务器ID")
+    proposer_id = Column(BigInteger, nullable=False, comment="提交者Discord ID")
+    status = Column(
+        String(20), nullable=False, default="pending", comment="pending/approved/rejected"
+    )
+    created_at = Column(DateTime, server_default=func.now())
+    expires_at = Column(DateTime, nullable=False, comment="审核过期时间")
+
+    def __repr__(self):
+        return f"<CommunitySettingPendingEntry(id={self.id}, status='{self.status}')>"
 
 
 # --- 社区成员模型 (关联表结构) ---
@@ -285,69 +316,9 @@ class CommunityMemberProfile(Base):
         Integer, nullable=False, default=0, server_default="0", comment="个人消息计数"
     )
 
-    # 与分块的一对多关系
-    chunks = relationship(
-        "CommunityMemberChunk", back_populates="profile", cascade="all, delete-orphan"
-    )
-
     def __repr__(self):
         return f"<CommunityMemberProfile(id={self.id}, discord_id='{self.discord_id}')>"
 
-
-class CommunityMemberChunk(Base):
-    """
-    代表来自 CommunityMemberProfile 的一个文本块，及其对应的向量。
-    我们将在此表上执行向量搜索。
-    """
-
-    __tablename__ = "member_chunks"
-    __table_args__ = (
-        # HNSW 索引用于向量搜索
-        Index(
-            "idx_cm_bge_embedding_hnsw",
-            "bge_embedding",
-            postgresql_using="hnsw",
-            postgresql_with={"m": 16, "ef_construction": 64},
-            postgresql_ops={"bge_embedding": "halfvec_cosine_ops"},
-        ),
-        Index(
-            "idx_cm_qwen_embedding_hnsw",
-            "qwen_embedding",
-            postgresql_using="hnsw",
-            postgresql_with={"m": 16, "ef_construction": 64},
-            postgresql_ops={"qwen_embedding": "halfvec_cosine_ops"},
-        ),
-        {"schema": COMMUNITY_SCHEMA},
-    )
-
-    id = Column(Integer, primary_key=True)
-
-    # 链接回父档案的外键
-    profile_id = Column(
-        Integer, ForeignKey(f"{COMMUNITY_SCHEMA}.member_profiles.id"), nullable=False
-    )
-
-    chunk_index = Column(Integer, nullable=False, comment="分块在档案中的序号")
-    chunk_text = Column(Text, nullable=False, comment="这个特定文本块的内容")
-
-    bge_embedding = Column(
-        HALFVEC(EMBEDDING_DIMENSION),
-        nullable=False,
-        comment="BGE-M3 模型的嵌入向量。",
-    )
-    qwen_embedding = Column(
-        HALFVEC(QWEN_EMBEDDING_DIMENSION),
-        nullable=True,
-        comment="Qwen3-Embedding-0.6B 模型的嵌入向量。",
-    )
-
-    created_at = Column(DateTime, server_default=func.now())
-
-    # 回到 CommunityMemberProfile 的多对一关系
-    profile = relationship("CommunityMemberProfile", back_populates="chunks")
-
-    def __repr__(self):
-        return f"<CommunityMemberChunk(id={self.id}, profile_id={self.profile_id}, chunk_index={self.chunk_index})>"
 
 
 class TokenUsage(Base):
@@ -498,52 +469,6 @@ class UserMemoryNote(Base):
         return f"<UserMemoryNote(id={self.id}, user_id='{self.user_id}', category='{self.category}')>"
 
 
-# --- 商店商品模型 (PostgreSQL) ---
-
-
-class ShopItem(Base):
-    """
-    商店商品表，用于存储商品配置和CG图片URL。
-    商品数据从SQLite迁移到PostgreSQL，用户数据保留在SQLite。
-    """
-
-    __tablename__ = "shop_items"
-    __table_args__ = {"schema": SHOP_SCHEMA}
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False, comment="商品名称"
-    )
-    description: Mapped[str] = mapped_column(Text, nullable=True, comment="商品描述")
-    price: Mapped[int] = mapped_column(
-        Integer, nullable=False, comment="商品价格（金币）"
-    )
-    category: Mapped[str] = mapped_column(
-        String(100), nullable=False, comment="商品类别"
-    )
-    target: Mapped[str] = mapped_column(
-        String(50), nullable=False, default="self", comment="商品目标（self/ai）"
-    )
-    effect_id: Mapped[Optional[str]] = mapped_column(
-        String(100), nullable=True, comment="商品效果ID"
-    )
-    cg_url: Mapped[list[str] | None] = mapped_column(
-        JSON, nullable=True, comment="CG图片的Discord链接列表"
-    )
-    is_available: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, comment="是否可用（1=可用，0=不可用）"
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
-
-    def __repr__(self):
-        return f"<ShopItem(id={self.id}, name='{self.name}', price={self.price})>"
-
-
 # --- 论坛搜索模型 (ParadeDB) ---
 
 
@@ -648,6 +573,32 @@ class ForumThread(Base):
         return f"<ForumThread(id={self.id}, thread_id={self.thread_id}, thread_name='{self.thread_name}')>"
 
 
+class ForumProcessedThread(Base):
+    """已索引的论坛帖子ID（避免重复处理，原 forum_sync_status.db 迁移）"""
+
+    __tablename__ = "processed_threads"
+    __table_args__ = {"schema": FORUM_SCHEMA}
+
+    thread_id = Column(BigInteger, primary_key=True)
+
+    def __repr__(self):
+        return f"<ForumProcessedThread(thread_id={self.thread_id})>"
+
+
+class ForumBackfillStatus(Base):
+    """每个论坛频道的历史回溯进度书签"""
+
+    __tablename__ = "backfill_status"
+    __table_args__ = {"schema": FORUM_SCHEMA}
+
+    channel_id = Column(BigInteger, primary_key=True)
+    oldest_known_timestamp = Column(String(50), nullable=True)
+    is_complete = Column(Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<ForumBackfillStatus(channel_id={self.channel_id}, complete={self.is_complete})>"
+
+
 # --- 对话记忆块模型 (ParadeDB) ---
 
 
@@ -746,132 +697,7 @@ class ConversationBlock(Base):
         return f"<ConversationBlock(id={self.id}, discord_id='{self.discord_id}', start_time={self.start_time})>"
 
 
-# --- Economy 模型 (ParadeDB) ---
-
-
-class UserCoins(Base):
-    __tablename__ = "user_coins"
-    __table_args__ = (
-        Index("ix_coins_user_id", "user_id", unique=True),
-        {"schema": ECONOMY_SCHEMA},
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    balance: Mapped[int] = mapped_column(Integer, default=0)
-    last_daily_message_date: Mapped[str | None] = mapped_column(
-        String(20), nullable=True
-    )
-    last_red_envelope_date: Mapped[str | None] = mapped_column(
-        String(20), nullable=True
-    )
-    coffee_effect_expires_at: Mapped[datetime.datetime | None] = mapped_column(
-        DateTime, nullable=True
-    )
-    has_withered_sunflower: Mapped[bool | None] = mapped_column(
-        Integer, default=None, nullable=True
-    )
-    blocks_thread_replies: Mapped[bool] = mapped_column(Integer, default=0)
-    thread_cooldown_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    thread_cooldown_duration: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    thread_cooldown_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
-
-    def __repr__(self):
-        return f"<UserCoins(user_id='{self.user_id}', balance={self.balance})>"
-
-
-class CoinTransaction(Base):
-    __tablename__ = "coin_transactions"
-    __table_args__ = (
-        Index("ix_tx_user_id", "user_id"),
-        Index("ix_tx_timestamp", "timestamp"),
-        {"schema": ECONOMY_SCHEMA},
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    reason: Mapped[str] = mapped_column(String(255), nullable=False)
-    timestamp: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
-
-    def __repr__(self):
-        return f"<CoinTransaction(user_id='{self.user_id}', amount={self.amount})>"
-
-
-class CoinLoan(Base):
-    __tablename__ = "coin_loans"
-    __table_args__ = (
-        Index("ix_loans_user", "user_id"),
-        {"schema": ECONOMY_SCHEMA},
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    amount: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="active")
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
-    paid_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
-
-    def __repr__(self):
-        return f"<CoinLoan(user_id='{self.user_id}', amount={self.amount}, status='{self.status}')>"
-
-
-class InteractionLog(Base):
-    __tablename__ = "interaction_logs"
-    __table_args__ = (
-        Index("ix_interact_user_type", "user_id", "interaction_type"),
-        {"schema": ECONOMY_SCHEMA},
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(50), nullable=False)
-    interaction_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    timestamp: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
-
-    def __repr__(self):
-        return f"<InteractionLog(user_id='{self.user_id}', type='{self.interaction_type}')>"
-
-
 # --- User 扩展模型 (ParadeDB) ---
-
-
-class UserAffection(Base):
-    __tablename__ = "user_affection"
-    __table_args__ = (
-        Index("ix_affection_user_id", "user_id", unique=True),
-        {"schema": USER_SCHEMA},
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    affection_points: Mapped[int] = mapped_column(Integer, default=0)
-    daily_affection_gain: Mapped[int] = mapped_column(Integer, default=0)
-    last_update_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    last_interaction_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    last_gift_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now()
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
-
-    def __repr__(self):
-        return (
-            f"<UserAffection(user_id='{self.user_id}', points={self.affection_points})>"
-        )
 
 
 class UserWarningRecord(Base):
@@ -1044,3 +870,208 @@ class ContentFilterKeyword(Base):
 
     def __repr__(self):
         return f"<ContentFilterKeyword(keyword='{self.keyword}', is_ignored={self.is_ignored})>"
+
+
+# --- Bot 运行时数据模型（原遗留 SQLite chat.db 迁移至 PostgreSQL） ---
+
+BOT_SCHEMA = "bot"
+
+
+class GlobalSetting(Base):
+    """全局键值设置（embedding 模型选择、工具禁用列表等）"""
+
+    __tablename__ = "global_settings"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    key = Column(String(100), primary_key=True)
+    value = Column(Text, nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<GlobalSetting(key='{self.key}')>"
+
+
+class BlacklistedUser(Base):
+    """服务器级黑名单（警告系统自动加入）"""
+
+    __tablename__ = "blacklisted_users"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    user_id = Column(BigInteger, primary_key=True)
+    guild_id = Column(BigInteger, primary_key=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self):
+        return f"<BlacklistedUser(user_id={self.user_id}, guild_id={self.guild_id})>"
+
+
+class GloballyBlacklistedUser(Base):
+    """全局黑名单"""
+
+    __tablename__ = "globally_blacklisted_users"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    user_id = Column(BigInteger, primary_key=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self):
+        return f"<GloballyBlacklistedUser(user_id={self.user_id})>"
+
+
+class GlobalChatConfig(Base):
+    """服务器级聊天配置（总开关、故障降级开关）"""
+
+    __tablename__ = "global_chat_config"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    guild_id = Column(BigInteger, primary_key=True)
+    chat_enabled = Column(Integer, nullable=False, default=1)
+    api_fallback_enabled = Column(Integer, nullable=False, default=1)
+
+    def __repr__(self):
+        return f"<GlobalChatConfig(guild_id={self.guild_id})>"
+
+
+class ChannelChatConfig(Base):
+    """频道/分类级聊天配置（继承自全局，可覆盖开关与冷却）"""
+
+    __tablename__ = "channel_chat_config"
+    __table_args__ = (
+        Index("uq_channel_config_entity", "guild_id", "entity_id", unique=True),
+        {"schema": BOT_SCHEMA},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    guild_id = Column(BigInteger, nullable=False)
+    entity_id = Column(BigInteger, nullable=False, comment="频道ID或分类ID")
+    entity_type = Column(String(20), nullable=False, comment="'channel' 或 'category'")
+    is_chat_enabled = Column(Integer, nullable=True, comment="可空，为空则继承上级")
+    cooldown_seconds = Column(Integer, nullable=True)
+    cooldown_duration = Column(Integer, nullable=True)
+    cooldown_limit = Column(Integer, nullable=True)
+
+    def __repr__(self):
+        return f"<ChannelChatConfig(guild_id={self.guild_id}, entity_id={self.entity_id})>"
+
+
+class UserChannelTimestamp(Base):
+    """频率限制：用户在频道内的消息时间戳"""
+
+    __tablename__ = "user_channel_timestamps"
+    __table_args__ = (
+        Index("idx_user_channel_ts", "user_id", "channel_id", "timestamp"),
+        {"schema": BOT_SCHEMA},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    channel_id = Column(BigInteger, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<UserChannelTimestamp(user_id={self.user_id}, channel_id={self.channel_id})>"
+
+
+class UserChannelCooldown(Base):
+    """固定时长冷却：用户在频道内的最后消息时间"""
+
+    __tablename__ = "user_channel_cooldown"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    user_id = Column(BigInteger, primary_key=True)
+    channel_id = Column(BigInteger, primary_key=True)
+    last_message_timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<UserChannelCooldown(user_id={self.user_id}, channel_id={self.channel_id})>"
+
+
+class MutedChannel(Base):
+    """被投票禁言的频道"""
+
+    __tablename__ = "muted_channels"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    channel_id = Column(BigInteger, primary_key=True)
+    muted_at = Column(DateTime(timezone=True), server_default=func.now())
+    muted_until = Column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self):
+        return f"<MutedChannel(channel_id={self.channel_id})>"
+
+
+class AiPrompt(Base):
+    """每服务器的自定义提示词模板"""
+
+    __tablename__ = "ai_prompts"
+    __table_args__ = (
+        Index("uq_ai_prompts_guild_name", "guild_id", "prompt_name", unique=True),
+        {"schema": BOT_SCHEMA},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    guild_id = Column(BigInteger, nullable=False)
+    prompt_name = Column(String(100), nullable=False)
+    prompt_content = Column(Text, nullable=False)
+    is_active = Column(Integer, nullable=False, default=1)
+
+    def __repr__(self):
+        return f"<AiPrompt(guild_id={self.guild_id}, name='{self.prompt_name}')>"
+
+
+class ChannelMemoryAnchor(Base):
+    """频道记忆锚点（频道上下文检索的起点消息）"""
+
+    __tablename__ = "channel_memory_anchors"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    guild_id = Column(BigInteger, primary_key=True)
+    channel_id = Column(BigInteger, primary_key=True)
+    anchor_message_id = Column(BigInteger, nullable=False)
+
+    def __repr__(self):
+        return f"<ChannelMemoryAnchor(channel_id={self.channel_id})>"
+
+
+class ModelUsage(Base):
+    """模型累计使用计数"""
+
+    __tablename__ = "ai_model_usage"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    model_name = Column(String(200), primary_key=True)
+    provider_name = Column(String(100), nullable=True)
+    usage_count = Column(Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<ModelUsage(model='{self.model_name}', count={self.usage_count})>"
+
+
+class DailyModelUsage(Base):
+    """模型每日使用计数（北京时间）"""
+
+    __tablename__ = "daily_model_usage"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    model_name = Column(String(200), primary_key=True)
+    usage_date = Column(String(10), primary_key=True, comment="北京时间日期 YYYY-MM-DD")
+    provider_name = Column(String(100), nullable=True)
+    usage_count = Column(Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<DailyModelUsage(model='{self.model_name}', date='{self.usage_date}')>"
+
+
+class DailyStat(Base):
+    """功能每日使用统计"""
+
+    __tablename__ = "daily_stats"
+    __table_args__ = {"schema": BOT_SCHEMA}
+
+    stat_date = Column(String(10), primary_key=True, comment="北京时间日期 YYYY-MM-DD")
+    issue_user_warning_count = Column(Integer, nullable=False, default=0)
+    tarot_reading_count = Column(Integer, nullable=False, default=0)
+    forum_search_count = Column(Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<DailyStat(date='{self.stat_date}')>"

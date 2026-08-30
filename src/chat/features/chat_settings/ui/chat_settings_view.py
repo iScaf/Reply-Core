@@ -1,11 +1,10 @@
 import discord
-from discord.ui import View, Button, Select
+from discord.ui import View, Button
 from discord import (
     ButtonStyle,
-    SelectOption,
     Interaction,
 )
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 
 from src.chat.features.chat_settings.services.chat_settings_service import (
     chat_settings_service,
@@ -14,11 +13,9 @@ from src.database.services.token_usage_service import token_usage_service
 from src.database.database import AsyncSessionLocal
 from src.database.models import TokenUsage
 from datetime import datetime
-from src.chat.features.chat_settings.ui.warm_up_settings_view import WarmUpSettingsView
 from src.chat.features.chat_settings.ui.cooldown_settings_view import (
     CooldownSettingsView,
 )
-from src.chat.services.event_service import event_service
 from src.chat.features.chat_settings.ui.ai_model_settings_view import (
     AIModelSettingsView,
 )
@@ -34,8 +31,6 @@ class ChatSettingsView(View):
         self.settings: Dict[str, Any] = {}
         self.model_usage_counts: Dict[str, int] = {}
         self.message: Optional[discord.Message] = None
-        self.factions: Optional[List[Dict[str, Any]]] = None
-        self.selected_faction: Optional[str] = None
         self.token_usage: Optional[TokenUsage] = None
         self.interaction: Interaction = interaction
 
@@ -49,8 +44,6 @@ class ChatSettingsView(View):
             self.token_usage = await token_usage_service.get_token_usage(
                 session, datetime.utcnow().date()
             )
-        self.factions = event_service.get_event_factions()
-        self.selected_faction = event_service.get_selected_faction()
         self._create_view_items()
 
     @classmethod
@@ -71,16 +64,6 @@ class ChatSettingsView(View):
                 label=f"聊天总开关: {'开' if global_chat_enabled else '关'}",
                 style=ButtonStyle.green if global_chat_enabled else ButtonStyle.red,
                 custom_id="global_chat_toggle",
-                row=0,
-            )
-        )
-
-        warm_up_enabled = self.settings.get("global", {}).get("warm_up_enabled", True)
-        self.add_item(
-            Button(
-                label=f"暖贴功能: {'开' if warm_up_enabled else '关'}",
-                style=ButtonStyle.green if warm_up_enabled else ButtonStyle.red,
-                custom_id="warm_up_toggle",
                 row=0,
             )
         )
@@ -121,34 +104,6 @@ class ChatSettingsView(View):
             )
         )
 
-        # 活动派系选择器 (第 1 行)
-        if self.factions:
-            faction_options = [
-                SelectOption(
-                    label="无 / 默认",
-                    value="_default",
-                    default=self.selected_faction is None,
-                )
-            ]
-            for faction in self.factions:
-                is_selected = self.selected_faction == faction["faction_id"]
-                faction_options.append(
-                    SelectOption(
-                        label=f"{faction['faction_name']} ({faction['faction_id']})",
-                        value=faction["faction_id"],
-                        default=is_selected,
-                    )
-                )
-
-            faction_select = Select(
-                placeholder="设置当前活动派系人设...",
-                options=faction_options,
-                custom_id="faction_select",
-                row=1,
-            )
-            faction_select.callback = self.on_faction_select
-            self.add_item(faction_select)
-
         # 功能按钮 (第 2 行)
         self.add_item(
             Button(
@@ -165,15 +120,6 @@ class ChatSettingsView(View):
                 label=f"🐢 回复延迟: {reply_delay}s",
                 style=ButtonStyle.secondary,
                 custom_id="reply_delay_settings",
-                row=2,
-            )
-        )
-
-        self.add_item(
-            Button(
-                label="设置暖贴频道",
-                style=ButtonStyle.secondary,
-                custom_id="warm_up_settings",
                 row=2,
             )
         )
@@ -298,7 +244,7 @@ class ChatSettingsView(View):
 
     async def _update_view(self, interaction: Interaction):
         """通过编辑附加的消息来刷新视图。"""
-        await self._initialize()  # 重新获取所有数据，包括派系
+        await self._initialize()  # 重新获取所有数据
         await interaction.response.edit_message(view=self)
 
     async def interaction_check(self, interaction: Interaction) -> bool:
@@ -306,8 +252,6 @@ class ChatSettingsView(View):
 
         if custom_id == "global_chat_toggle":
             await self.on_global_toggle(interaction)
-        elif custom_id == "warm_up_toggle":
-            await self.on_warm_up_toggle(interaction)
         elif custom_id == "api_fallback_toggle":
             await self.on_api_fallback_toggle(interaction)
         elif custom_id == "feeding_image_toggle":
@@ -318,8 +262,6 @@ class ChatSettingsView(View):
             await self.on_cooldown_settings(interaction)
         elif custom_id == "reply_delay_settings":
             await self.on_reply_delay_settings(interaction)
-        elif custom_id == "warm_up_settings":
-            await self.on_warm_up_settings(interaction)
         elif custom_id == "ai_model_settings":
             await self.on_ai_model_settings(interaction)
         elif custom_id == "tool_model_settings":
@@ -353,16 +295,6 @@ class ChatSettingsView(View):
         new_state = not current_state
         await self.service.db_manager.set_global_setting(
             "chat_enabled", str(new_state)
-        )
-        await self._update_view(interaction)
-
-    async def on_warm_up_toggle(self, interaction: Interaction):
-        current_state = self.settings.get("global", {}).get("warm_up_enabled", True)
-        new_state = not current_state
-        if not self.guild:
-            return
-        await self.service.db_manager.update_global_chat_config(
-            self.guild.id, warm_up_enabled=new_state
         )
         await self._update_view(interaction)
 
@@ -432,36 +364,6 @@ class ChatSettingsView(View):
 
         modal = ReplyDelayModal(current_delay=current_delay, on_submit_callback=on_submit)
         await interaction.response.send_modal(modal)
-
-    async def on_warm_up_settings(self, interaction: Interaction):
-        """切换到暖贴频道设置视图。"""
-        if not self.message:
-            await interaction.response.send_message(
-                "无法找到原始消息，请重新打开设置面板。", ephemeral=True
-            )
-            return
-
-        await interaction.response.defer()
-        warm_up_view = await WarmUpSettingsView.create(interaction, self.message)
-        await interaction.edit_original_response(
-            content="管理暖贴功能启用的论坛频道：", view=warm_up_view
-        )
-        self.stop()
-
-    async def on_faction_select(self, interaction: Interaction):
-        """处理派系选择事件。"""
-        if not interaction.data or "values" not in interaction.data:
-            await interaction.response.defer()
-            return
-
-        selected_faction_id = interaction.data["values"][0]
-
-        if selected_faction_id == "_default":
-            event_service.set_selected_faction(None)
-        else:
-            event_service.set_selected_faction(selected_faction_id)
-
-        await self._update_view(interaction)
 
     async def on_ai_model_settings(self, interaction: Interaction):
         """打开AI模型设置视图。"""

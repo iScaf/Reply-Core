@@ -103,7 +103,7 @@ class MessageProcessor:
         try:
             headers = {
                 "Accept": "image/gif,image/png,image/jpeg,image/webp,*/*",
-                "User-Agent": "OdysseiaDiscordBot/1.0",
+                "User-Agent": "ReplyCoreBot/1.0",
             }
             async with session.get(
                 url,

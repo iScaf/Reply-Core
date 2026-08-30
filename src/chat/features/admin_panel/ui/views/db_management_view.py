@@ -4,12 +4,8 @@ import discord
 import logging
 from typing import Optional, cast
 
-from src.chat.features.admin_panel.ui.coin_management_view import CoinManagementView
-from .community_members_view import CommunityMembersView
-from .general_knowledge_view import GeneralKnowledgeView
-from .work_events_view import WorkEventsView
+from .community_settings_view import CommunitySettingsView
 from .vector_db_view import VectorDBView
-from src.config import CURRENCY_NAME
 
 log = logging.getLogger(__name__)
 
@@ -44,15 +40,8 @@ class DBManagementView(discord.ui.View):
         """创建表格选择下拉菜单"""
         options = [
             discord.SelectOption(
-                label="社区成员档案", value="community_members", emoji="👥"
+                label="社区设定", value="community_settings", emoji="📚"
             ),
-            discord.SelectOption(
-                label="通用知识", value="general_knowledge", emoji="📚"
-            ),
-            discord.SelectOption(
-                label=f"{CURRENCY_NAME}管理", value="coin_management", emoji="🪙"
-            ),
-            discord.SelectOption(label="工作管理", value="work_events", emoji="💼"),
             discord.SelectOption(
                 label="向量库元数据", value="vector_db_metadata", emoji="🧠"
             ),
@@ -86,16 +75,10 @@ class DBManagementView(discord.ui.View):
             log.error("DBView's message is None, cannot switch to a child view.")
             return
 
-        if selected_value == "community_members":
-            view = CommunityMembersView(self.author_id, self.message, self)
-        elif selected_value == "general_knowledge":
-            view = GeneralKnowledgeView(self.author_id, self.message, self)
-        elif selected_value == "work_events":
-            view = WorkEventsView(self.author_id, self.message, self)
+        if selected_value == "community_settings":
+            view = CommunitySettingsView(self.author_id, self.message, self)
         elif selected_value == "vector_db_metadata":
             view = VectorDBView(self.author_id, self.message, self)
-        elif selected_value == "coin_management":
-            view = CoinManagementView(interaction, self.message)
 
         if view and self.message:
             await view.update_view()

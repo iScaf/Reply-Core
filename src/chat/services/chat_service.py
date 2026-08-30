@@ -12,9 +12,7 @@ from src.chat.services.ai.service import ai_service
 from src.chat.utils.prompt_utils import replace_emojis
 from src.chat.services.prompt_service import prompt_service
 from src.chat.services.context_service_test import get_context_service  # 导入测试服务
-from src.chat.features.world_book.services.world_book_service import world_book_service
-from src.chat.features.affection.service.affection_service import affection_service
-from src.chat.features.odysseia_coin.service.coin_service import coin_service
+from src.chat.features.community_settings.services.community_settings_service import community_settings_service
 from src.chat.utils.database import chat_db_manager
 from src.chat.features.personal_memory.services.personal_memory_service import (
     personal_memory_service,
@@ -73,30 +71,8 @@ class ChatService:
             )
 
         if not effective_config.get("is_chat_enabled", True):
-            # 检查是否满足通行许可的例外条件
-            pass_is_granted = False
-            if isinstance(message.channel, discord.Thread) and message.channel.owner_id:
-                # 修正逻辑：只有当帖主明确设置了个人CD时，才算拥有"通行许可"
-                owner_id = message.channel.owner_id
-                owner_config = await coin_service.get_thread_cooldown_settings(owner_id)
-
-                if owner_config:
-                    has_personal_cd = owner_config[
-                        "thread_cooldown_seconds"
-                    ] is not None or (
-                        owner_config["thread_cooldown_duration"] is not None
-                        and owner_config["thread_cooldown_limit"] is not None
-                    )
-                    if has_personal_cd:
-                        pass_is_granted = True
-                        log.info(
-                            f"帖主 {owner_id} 拥有个人CD设置（通行许可），覆盖频道 {message.channel.id} 的聊天限制。"
-                        )
-
-            # 如果没有授予通行权，则按原逻辑返回 False
-            if not pass_is_granted:
-                log.info(f"频道 {message.channel.id} 聊天已禁用，跳过前置检查。")
-                return False
+            log.info(f"频道 {message.channel.id} 聊天已禁用，跳过前置检查。")
+            return False
 
         # 3. 新版冷却时间检查
         if await chat_settings_service.is_user_on_cooldown(
@@ -146,9 +122,9 @@ class ChatService:
                 message.channel
             )
 
-        # --- 个人记忆消息计数 ---
-        user_profile_data = await world_book_service.get_profile_by_discord_id(
-            author.id
+        # --- 个人记忆消息计数（首次对话自动建档，名片功能已移除） ---
+        user_profile_data = await community_settings_service.get_or_create_profile(
+            author.id, author.display_name
         )
 
         user_content = processed_data["user_content"]
@@ -179,10 +155,9 @@ class ChatService:
                 )
 
             # --- 新增：集中获取所有上下文数据 ---
-            affection_status = await affection_service.get_affection_status(author.id)
             persona_style = await persona_preference_service.get_persona_style(str(author.id))
 
-            # 获取记忆笔记（仅对有名片用户）
+            # 获取记忆笔记
             memory_notes_text = None
             if user_profile_data:
                 try:
@@ -192,7 +167,7 @@ class ChatService:
                 except Exception as mem_note_e:
                     log.error(f"获取用户 {author.id} 记忆笔记失败: {mem_note_e}")
 
-            # 获取最近聊天历史（仅对有名片用户，1-10条递增）
+            # 获取最近聊天历史（1-10条递增）
             recent_chat_history = None
             if user_profile_data:
                 try:
@@ -201,20 +176,6 @@ class ChatService:
                     )
                 except Exception as hist_e:
                     log.error(f"获取用户 {author.id} 最近聊天历史失败: {hist_e}")
-
-            # 3. --- 好感度与奖励更新（前置） ---
-            try:
-                # 在生成回复前更新好感度，以确保日志顺序正确
-                await affection_service.increase_affection_on_message(author.id)
-            except Exception as aff_e:
-                log.error(f"增加用户 {author.id} 的好感度时出错: {aff_e}")
-
-            try:
-                # 发放每日首次对话奖励
-                if await coin_service.grant_daily_message_reward(author.id):
-                    log.info(f"已为用户 {author.id} 发放每日首次对话奖励。")
-            except Exception as coin_e:
-                log.error(f"为用户 {author.id} 发放每日对话奖励时出错: {coin_e}")
 
             # 4. --- 调用AI生成回复 ---
             # 记录发送给AI的核心上下文
@@ -293,8 +254,7 @@ class ChatService:
                 replied_message=replied_content,
                 images=image_data_list if image_data_list else None,
                 channel_context=channel_context,
-                world_book_entries=None,
-                affection_status=affection_status,
+                community_settings_entries=None,
                 guild_name=guild_name,
                 location_name=location_name,
                 personal_summary=None,
@@ -471,7 +431,6 @@ class ChatService:
 
             # 6. --- 异步执行后续任务（不阻塞回复） ---
             # 此处现在只应包含不影响核心回复流程的日志记录等任务
-            # self._log_rag_summary(author, final_content, world_book_entries, final_response)
 
             log.info(f"已为用户 {author.display_name} 生成AI回复: {final_response}")
             return ChatResult(content=final_response, tools_called=_called_tools)
@@ -491,56 +450,6 @@ class ChatService:
         # 转换表情包占位符为Discord自定义表情
         formatted_response = replace_emojis(formatted_response)
         return formatted_response
-
-    async def _perform_post_response_tasks(
-        self,
-        author: discord.User,
-        guild_id: int,
-        query: str,
-        rag_entries: list,
-        response: str,
-    ):
-        """执行发送回复后的任务，如记录日志。"""
-        # 好感度和奖励逻辑已前置，此处保留用于未来可能的其他后处理任务
-
-        # 记录 RAG 诊断日志
-        # self._log_rag_summary(author, query, rag_entries, response)
-        pass
-
-    def _log_rag_summary(
-        self, author: discord.User, query: str, entries: list, response: str
-    ):
-        """生成并记录 RAG 诊断摘要日志。"""
-        try:
-            if entries:
-                doc_details = []
-                for entry in entries:
-                    distance = entry.get("distance", "N/A")
-                    distance_str = (
-                        f"{distance:.4f}"
-                        if isinstance(distance, (int, float))
-                        else str(distance)
-                    )
-                    content = str(entry.get("content", "N/A")).replace("\n", "\n    ")
-                    doc_details.append(
-                        f"  - Doc ID: {entry.get('id', 'N/A')}, Distance: {distance_str}\n"
-                        f"    Content: {content}"
-                    )
-                retrieved_docs_summary = "\n" + "\n".join(doc_details)
-            else:
-                retrieved_docs_summary = " N/A"
-
-            summary_log_message = (
-                f"\n--- RAG DIAGNOSTIC SUMMARY ---\n"
-                f"User: {author} ({author.id})\n"
-                f'Initial Query: "{query}"\n'
-                f"Retrieved Docs:{retrieved_docs_summary}\n"
-                f'Final AI Response: "{response}"\n'
-                f"------------------------------"
-            )
-            log.info(summary_log_message)
-        except Exception as log_e:
-            log.error(f"生成 RAG 诊断摘要日志时出错: {log_e}")
 
 
 # 创建一个单例

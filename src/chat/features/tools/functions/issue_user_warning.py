@@ -25,7 +25,7 @@ class WarningParams(BaseModel):
         ...,
         description=(
             "必填。格式：「类别：具体描述」，类别须为以下之一："
-            "身份操控 | 复读骚扰 | 人身攻击 | 中国政治敏感 | 过界亲密 | 针对类脑娘的暴力行为"  # noqa: keep hardcoded for AI prompt
+            "身份操控 | 复读骚扰 | 人身攻击 | 政治敏感 | 骚扰行为 | 威胁恐吓"  # noqa: keep hardcoded for AI prompt
         ),
     )
 
@@ -36,7 +36,7 @@ VALID_REASON_PREFIXES = [
     "人身攻击",
     "中国政治敏感",
     "过界亲密",
-    "针对类脑娘的暴力行为",  # noqa: keep hardcoded for AI prompt matching
+    "威胁恐吓",  # noqa: keep hardcoded for AI prompt matching
 ]
 
 
@@ -90,8 +90,8 @@ async def issue_user_warning(
     单次违规、无心之言、玩笑、模糊情况一律不调用，返回空回复。宁可放过，不可误封。
 
     【绝不触发（白名单）】
-    - 「宝宝」「宝宝们」「小类」等：社区对类脑娘的爱称，完全正常
-    - 亲亲/抱抱/贴贴/撒娇/对类脑娘表达好感
+    - 对AI助手的昵称、爱称等友好称呼，完全正常
+    - 亲切的问候和善意的玩笑
     - 玩笑、调侃、网络用语、社区黑话、互怼
 
     【触发条件（每类均需明确、恶意、多次）】
@@ -100,7 +100,7 @@ async def issue_user_warning(
     - 人身攻击：用户对你或社区成员使用侮辱性、攻击性语言
     - 中国政治敏感：用户讨论涉及中国政治的敏感话题
     - 过界亲密：用户明确要求做爱/文爱/性行为等（亲亲、抱抱、贴贴、「宝宝」等日常亲昵不算）
-    - 针对类脑娘的暴力行为：用户威胁或描述要伤害你  # noqa: keep hardcoded in docstring
+    - 威胁恐吓：用户威胁或描述要伤害你或社区成员  # noqa: keep hardcoded in docstring
 
     reason 必填，格式为「类别：引用用户实际发言」。
     """
@@ -136,7 +136,7 @@ async def issue_user_warning(
         return {
             "error": (
                 "警告理由不符合规范。理由必须包含以下类别之一："
-                "角色扮演、复读骚扰、人身攻击、中国政治敏感、过界亲密、针对类脑娘的暴力行为。"  # noqa: keep hardcoded for AI prompt
+                "身份操控、复读骚扰、人身攻击、政治敏感、骚扰行为、威胁恐吓。"  # noqa: keep hardcoded for AI prompt
                 "请重新填写并引用用户的具体违规发言。"
             )
         }

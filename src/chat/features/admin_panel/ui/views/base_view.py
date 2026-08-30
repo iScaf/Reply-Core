@@ -2,22 +2,20 @@
 
 import discord
 import logging
-import os
 import sqlite3
 from typing import List, Optional, Any, cast, Mapping, Union
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src import config
 from src.chat.features.admin_panel.services import db_services
 from src.chat.features.admin_panel.ui.modals.utility_modals import JumpToPageModal
-from src.chat.features.world_book.services.incremental_rag_service import (
+from src.chat.features.community_settings.services.incremental_rag_service import (
     incremental_rag_service,
 )
-from src.chat.utils.database import DB_PATH as CHAT_DB_PATH, get_database_url
+from src.chat.utils.database import get_database_url
 from src.database.models import (
     CommunityMemberProfile,
-    GeneralKnowledgeDocument,
+    CommunitySettingDocument,
     ConversationBlock,
 )
 
@@ -26,7 +24,7 @@ log = logging.getLogger(__name__)
 # 表名到 SQLAlchemy 模型的映射
 TABLE_TO_MODEL_MAP = {
     "community.member_profiles": CommunityMemberProfile,
-    "general_knowledge.knowledge_documents": GeneralKnowledgeDocument,
+    "community_settings.documents": CommunitySettingDocument,
     "conversation.conversation_blocks": ConversationBlock,
 }
 
@@ -39,12 +37,11 @@ class BaseTableView(discord.ui.View):
         self.author_id = author_id
         self.message = message
         self.parent_view = parent_view
-        self.world_book_db_path = os.path.join(config.DATA_DIR, "world_book.sqlite3")
         self.chat_db_path = CHAT_DB_PATH
 
         # --- 状态管理 ---
         self.current_table: Optional[str] = None
-        self.db_type: str = "sqlite"  # 默认 'sqlite', 可被子类覆盖
+        self.db_type: str = "parade"  # 默认 ParadeDB, 可被子类覆盖
         self.view_mode: str = "list"
         self.current_page: int = 0
         self.items_per_page: int = 10
@@ -63,12 +60,7 @@ class BaseTableView(discord.ui.View):
         return True
 
     def _get_db_connection(self) -> Optional[Union[sqlite3.Connection, Any]]:
-        db_path = (
-            self.chat_db_path
-            if self.current_table == "work_events"
-            else self.world_book_db_path
-        )
-        return db_services.get_db_connection(self.db_type, db_path=db_path)
+        return db_services.get_db_connection(self.db_type, db_path=self.chat_db_path)
 
     def _get_primary_key_column(self) -> str:
         return "id"  # 默认为 'id'，子类可以重写

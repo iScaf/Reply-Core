@@ -1,10 +1,9 @@
 import logging
 from typing import Dict, Any
 
-from src.chat.config import chat_config
 from src.chat.utils.database import chat_db_manager
 from src.database.database import AsyncSessionLocal
-from src.database.models import UserWarningRecord, UserAffection
+from src.database.models import UserWarningRecord
 from sqlalchemy import select
 
 log = logging.getLogger(__name__)
@@ -37,22 +36,6 @@ async def record_warning_and_check_blacklist(
                 current_warnings = 1
 
             await session.flush()
-
-            if current_warnings >= 1:
-                penalty = chat_config.AFFECTION_CONFIG["BLACKLIST_PENALTY"]
-                if penalty != 0:
-                    aff_result = await session.execute(
-                        select(UserAffection)
-                        .where(UserAffection.user_id == uid)
-                        .with_for_update()
-                    )
-                    affection = aff_result.scalar_one_or_none()
-                    if affection:
-                        affection.affection_points += penalty
-                    else:
-                        affection = UserAffection(user_id=uid, affection_points=penalty)
-                        session.add(affection)
-                    log.info(f"用户 {user_id} 因被禁言被扣除好感度: {penalty}")
 
     if current_warnings >= 1:
         log.info(f"用户 {user_id} 在服务器 {guild_id} 达到警告阈值，将被加入黑名单。")

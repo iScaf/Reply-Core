@@ -8,7 +8,7 @@ from sqlalchemy import delete, update, func
 
 from src.database.database import AsyncSessionLocal
 from src.database.models import UserMemoryNote
-from src.chat.features.world_book.services.world_book_service import world_book_service
+from src.chat.features.community_settings.services.community_settings_service import community_settings_service
 from src.config import BOT_NAME
 
 log = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def validate_memory_content(category: str, content: str) -> Tuple[bool, str]:
 
 class UserMemoryNoteService:
     async def has_profile(self, user_id: str) -> bool:
-        profile = await world_book_service.get_profile_by_discord_id(int(user_id))
+        profile = await community_settings_service.get_profile_by_discord_id(int(user_id))
         return profile is not None
 
     async def get_notes_for_user(self, user_id: str) -> List[UserMemoryNote]:

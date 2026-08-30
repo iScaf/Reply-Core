@@ -4,8 +4,6 @@ import discord
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
 from datetime import datetime, timedelta, timezone
 from src.chat.utils.database import chat_db_manager
-from src.chat.services.event_service import event_service
-from src.chat.features.odysseia_coin.service.coin_service import coin_service
 
 if TYPE_CHECKING:
     from src.chat.services.ai.config.models import ModelConfig
@@ -42,11 +40,9 @@ class ChatSettingsService:
 
     async def get_guild_settings(self, guild_id: int) -> Dict[str, Any]:
         """获取一个服务器的完整聊天设置，包括全局和所有特定频道的配置。"""
-        global_config_row = await self.db_manager.get_global_chat_config(guild_id)
         channel_configs_rows = await self.db_manager.get_all_channel_configs_for_guild(
             guild_id
         )
-        warm_up_channels = await self.db_manager.get_warm_up_channels(guild_id)
 
         # api_fallback_enabled 从全局设置读取
         api_fallback_value = await self.db_manager.get_global_setting(
@@ -106,9 +102,6 @@ class ChatSettingsService:
         settings = {
             "global": {
                 "chat_enabled": chat_enabled,
-                "warm_up_enabled": global_config_row["warm_up_enabled"]
-                if global_config_row
-                else True,
                 "api_fallback_enabled": api_fallback_enabled,
                 "feeding_image_enabled": feeding_image_enabled,
                 "feeding_command_enabled": feeding_command_enabled,
@@ -125,7 +118,6 @@ class ChatSettingsService:
                 }
                 for config in channel_configs_rows
             },
-            "warm_up_channels": warm_up_channels,
         }
         return settings
 
@@ -135,11 +127,6 @@ class ChatSettingsService:
         if value is not None:
             return value.lower() in ("true", "1", "yes", "on")
         return True
-
-    async def is_warm_up_enabled(self, guild_id: int) -> bool:
-        """检查暖贴功能是否开启。"""
-        config = await self.db_manager.get_global_chat_config(guild_id)
-        return config["warm_up_enabled"] if config else True
 
     async def is_api_fallback_enabled(self, guild_id: int) -> bool:
         """检查API fallback功能是否开启（全局设置）。"""
@@ -211,35 +198,6 @@ class ChatSettingsService:
             if channel_config["cooldown_limit"] is not None:
                 effective_config["cooldown_limit"] = channel_config["cooldown_limit"]
 
-        # 3. 如果是帖子，获取并应用帖子主人的个人设置 (最高优先级)
-        if isinstance(channel, discord.Thread) and channel.owner_id:
-            owner_id = channel.owner_id
-            owner_config = await coin_service.get_thread_cooldown_settings(owner_id)
-
-            if owner_config:
-                has_personal_fixed_cd = (
-                    owner_config["thread_cooldown_seconds"] is not None
-                )
-                has_personal_freq_cd = (
-                    owner_config["thread_cooldown_duration"] is not None
-                    and owner_config["thread_cooldown_limit"] is not None
-                )
-
-                if has_personal_fixed_cd:
-                    effective_config["cooldown_seconds"] = owner_config[
-                        "thread_cooldown_seconds"
-                    ]
-                    effective_config["cooldown_duration"] = None
-                    effective_config["cooldown_limit"] = None
-                elif has_personal_freq_cd:
-                    effective_config["cooldown_seconds"] = 0
-                    effective_config["cooldown_duration"] = owner_config[
-                        "thread_cooldown_duration"
-                    ]
-                    effective_config["cooldown_limit"] = owner_config[
-                        "thread_cooldown_limit"
-                    ]
-
         return effective_config
 
     async def is_user_on_cooldown(
@@ -293,37 +251,6 @@ class ChatSettingsService:
 
         # 总是更新固定CD的时间戳，以备模式切换或用于其他目的
         await self.db_manager.update_user_cooldown(user_id, channel_id)
-
-    async def get_warm_up_channels(self, guild_id: int) -> List[int]:
-        """获取服务器的所有暖贴频道ID。"""
-        return await self.db_manager.get_warm_up_channels(guild_id)
-
-    async def add_warm_up_channel(self, guild_id: int, channel_id: int):
-        """添加一个暖贴频道。"""
-        await self.db_manager.add_warm_up_channel(guild_id, channel_id)
-
-    async def remove_warm_up_channel(self, guild_id: int, channel_id: int):
-        """移除一个暖贴频道。"""
-        await self.db_manager.remove_warm_up_channel(guild_id, channel_id)
-
-    async def is_warm_up_channel(self, guild_id: int, channel_id: int) -> bool:
-        """检查一个频道是否是暖贴频道。"""
-        return await self.db_manager.is_warm_up_channel(guild_id, channel_id)
-
-    # --- Event Faction Settings ---
-
-    def get_event_factions(self) -> Optional[List[Dict[str, Any]]]:
-        """获取当前活动的所有派系。"""
-        return event_service.get_event_factions()
-
-    def set_winning_faction(self, faction_id: Optional[str]):
-        """设置当前活动的获胜派系。"""
-        if faction_id is not None:
-            event_service.set_winning_faction(faction_id)
-
-    def get_winning_faction(self) -> Optional[str]:
-        """获取当前活动的获胜派系。"""
-        return event_service.get_winning_faction()
 
     # --- AI Model Settings ---
 

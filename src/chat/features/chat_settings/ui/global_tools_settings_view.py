@@ -202,7 +202,6 @@ class GlobalToolsSettingsView(View):
 
         # 全局设置
         global_chat_enabled = view.settings.get("global", {}).get("chat_enabled", True)
-        warm_up_enabled = view.settings.get("global", {}).get("warm_up_enabled", True)
         api_fallback_enabled = view.settings.get("global", {}).get(
             "api_fallback_enabled", True
         )
@@ -210,7 +209,6 @@ class GlobalToolsSettingsView(View):
         embed.add_field(
             name="🌐 全局设置",
             value=f"聊天总开关: {'✅ 开' if global_chat_enabled else '❌ 关'}\n"
-            f"暖贴功能: {'✅ 开' if warm_up_enabled else '❌ 关'}\n"
             f"API回退: {'✅ 开' if api_fallback_enabled else '❌ 关'}",
             inline=False,
         )

@@ -180,10 +180,10 @@ class SearchUserModal(discord.ui.Modal):
                 )
 
 
-# --- 搜索社区知识的模态窗口 ---
+# --- 搜索社区设定的模态窗口 ---
 class SearchKnowledgeModal(discord.ui.Modal):
     def __init__(self, db_view: AnyDBView):
-        super().__init__(title="搜索社区知识")
+        super().__init__(title="搜索社区设定")
         self.db_view = db_view
         self.keyword_input = discord.ui.TextInput(
             label="输入搜索关键词",
@@ -211,33 +211,21 @@ class SearchKnowledgeModal(discord.ui.Modal):
             # 根据数据库类型选择正确的占位符
             placeholder = "?" if self.db_view.db_type == "sqlite" else "%s"
 
-            # 搜索标题和内容字段，使用LIKE进行模糊匹配
-            if self.db_view.db_type == "parade":
-                # PostgreSQL/ParadeDB 查询
-                cursor.execute(
-                    f"""
-                    SELECT id, title, full_text FROM general_knowledge.knowledge_documents
-                    WHERE title LIKE {placeholder} OR full_text LIKE {placeholder}
-                    ORDER BY created_at DESC, id DESC
-                    """,
-                    (f"%{keyword}%", f"%{keyword}%"),
-                )
-            else:
-                # SQLite 查询（旧表结构）
-                cursor.execute(
-                    f"""
-                    SELECT id, title, content_json FROM general_knowledge
-                    WHERE title LIKE {placeholder} OR content_json LIKE {placeholder}
-                    ORDER BY created_at DESC, id DESC
-                    """,
-                    (f"%{keyword}%", f"%{keyword}%"),
-                )
+            # 搜索标题和内容字段，使用LIKE进行模糊匹配（PostgreSQL/ParadeDB 查询）
+            cursor.execute(
+                f"""
+                SELECT id, title, full_text FROM community_settings.documents
+                WHERE title LIKE {placeholder} OR full_text LIKE {placeholder}
+                ORDER BY created_at DESC, id DESC
+                """,
+                (f"%{keyword}%", f"%{keyword}%"),
+            )
 
             results = cursor.fetchall()
 
             if not results:
                 await interaction.response.send_message(
-                    f"❌ 未找到包含关键词 `{keyword}` 的社区知识。", ephemeral=True
+                    f"❌ 未找到包含关键词 `{keyword}` 的社区设定。", ephemeral=True
                 )
                 return
 
@@ -256,171 +244,12 @@ class SearchKnowledgeModal(discord.ui.Modal):
             await interaction.response.defer()
             await self.db_view.update_view()
             await interaction.followup.send(
-                f"✅ 找到 {len(results)} 条包含关键词 `{keyword}` 的社区知识。",
+                f"✅ 找到 {len(results)} 条包含关键词 `{keyword}` 的社区设定。",
                 ephemeral=True,
             )
 
         except Exception as e:
-            log.error(f"搜索社区知识时发生数据库错误: {e}", exc_info=True)
-            await interaction.response.send_message(
-                f"搜索时发生数据库错误: {e}", ephemeral=True
-            )
-        finally:
-            if conn:
-                conn.close()
-
-
-# --- 新增：搜索工作事件的模态窗口 ---
-class SearchWorkEventModal(discord.ui.Modal):
-    def __init__(self, db_view: AnyDBView):
-        super().__init__(title="搜索工作事件")
-        self.db_view = db_view
-        self.keyword_input = discord.ui.TextInput(
-            label="输入搜索关键词",
-            placeholder="搜索名称和描述...",
-            required=True,
-            max_length=100,
-        )
-        self.add_item(self.keyword_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        keyword = self.keyword_input.value.strip()
-        if not keyword:
-            await interaction.response.send_message(
-                "请输入有效的搜索关键词。", ephemeral=True
-            )
-            return
-
-        conn = self.db_view._get_db_connection()
-        if not conn:
-            await interaction.response.send_message("数据库连接失败。", ephemeral=True)
-            return
-
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT * FROM work_events
-                WHERE name LIKE ? OR description LIKE ?
-                ORDER BY id DESC
-                """,
-                (f"%{keyword}%", f"%{keyword}%"),
-            )
-            results = cursor.fetchall()
-
-            if not results:
-                await interaction.response.send_message(
-                    f"❌ 未找到包含关键词 `{keyword}` 的工作事件。", ephemeral=True
-                )
-                return
-
-            self.db_view.current_list_items = results
-            self.db_view.current_page = 0
-            self.db_view.total_pages = (
-                len(results) + self.db_view.items_per_page - 1
-            ) // self.db_view.items_per_page
-            self.db_view.search_mode = True
-            self.db_view.search_keyword = keyword
-
-            await interaction.response.defer()
-            await self.db_view.update_view()
-            await interaction.followup.send(
-                f"✅ 找到 {len(results)} 条包含关键词 `{keyword}` 的工作事件。",
-                ephemeral=True,
-            )
-
-        except sqlite3.Error as e:
-            log.error(f"搜索工作事件时发生数据库错误: {e}", exc_info=True)
-            await interaction.response.send_message(
-                f"搜索时发生数据库错误: {e}", ephemeral=True
-            )
-        finally:
-            if conn:
-                conn.close()
-
-
-# --- 新增：搜索社区成员的模态窗口 ---
-class SearchCommunityMemberModal(discord.ui.Modal):
-    def __init__(self, db_view: AnyDBView):
-        super().__init__(title="搜索社区成员")
-        self.db_view = db_view
-        self.keyword_input = discord.ui.TextInput(
-            label="输入搜索关键词",
-            placeholder="搜索标题和内容...",
-            required=True,
-            max_length=100,
-        )
-        self.add_item(self.keyword_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        keyword = self.keyword_input.value.strip()
-        if not keyword:
-            await interaction.response.send_message(
-                "请输入有效的搜索关键词。", ephemeral=True
-            )
-            return
-
-        conn = self.db_view._get_db_connection()
-        if not conn:
-            await interaction.response.send_message("数据库连接失败。", ephemeral=True)
-            return
-
-        try:
-            cursor = db_services.get_cursor(conn)
-            # 根据数据库类型选择正确的占位符
-            placeholder = "?" if self.db_view.db_type == "sqlite" else "%s"
-
-            # 搜索 title 和 content_json 字段
-            # 注意：表名已从 community_members 改为 community.member_profiles
-            # 并且字段名可能已更改，需要根据实际表结构调整
-            if self.db_view.db_type == "parade":
-                # PostgreSQL/ParadeDB 查询
-                cursor.execute(
-                    f"""
-                    SELECT * FROM community.member_profiles
-                    WHERE title LIKE {placeholder} OR full_text LIKE {placeholder}
-                    ORDER BY id DESC
-                    """,
-                    (f"%{keyword}%", f"%{keyword}%"),
-                )
-            else:
-                # SQLite 查询（旧表结构）
-                cursor.execute(
-                    f"""
-                    SELECT * FROM community.member_profiles
-                    WHERE title LIKE {placeholder} OR content_json LIKE {placeholder}
-                    ORDER BY id DESC
-                    """,
-                    (f"%{keyword}%", f"%{keyword}%"),
-                )
-
-            results = cursor.fetchall()
-
-            if not results:
-                await interaction.response.send_message(
-                    f"❌ 未找到包含关键词 `{keyword}` 的社区成员档案。", ephemeral=True
-                )
-                return
-
-            # 将 DictRow 转换为字典
-            dict_results = [dict(row) for row in results]
-            self.db_view.current_list_items = dict_results
-            self.db_view.current_page = 0
-            self.db_view.total_pages = (
-                len(results) + self.db_view.items_per_page - 1
-            ) // self.db_view.items_per_page
-            self.db_view.search_mode = True
-            self.db_view.search_keyword = keyword
-
-            await interaction.response.defer()
-            await self.db_view.update_view()
-            await interaction.followup.send(
-                f"✅ 找到 {len(results)} 条包含关键词 `{keyword}` 的社区成员档案。",
-                ephemeral=True,
-            )
-
-        except Exception as e:
-            log.error(f"搜索社区成员时发生数据库错误: {e}", exc_info=True)
+            log.error(f"搜索社区设定时发生数据库错误: {e}", exc_info=True)
             await interaction.response.send_message(
                 f"搜索时发生数据库错误: {e}", ephemeral=True
             )
