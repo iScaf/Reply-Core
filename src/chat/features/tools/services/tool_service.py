@@ -230,6 +230,7 @@ class ToolService:
         user_name: Optional[str] = None,
         fallback_query: Optional[str] = None,
         channel_context: Optional[List[Dict]] = None,
+        guild_id: Optional[int] = None,
     ) -> types.Part:
         """
         执行单个工具调用，并以可发送回 Gemini 模型的格式返回结果。
@@ -368,6 +369,10 @@ class ToolService:
                     tool_args["thread_id"] = channel.id
                     if log_detailed:
                         log.info(f"检测到帖子上下文，已注入 'thread_id': {channel.id}")
+            elif guild_id is not None:
+                # 无 Discord 上下文（如 Web 控制台）时显式提供 guild_id，
+                # 供依赖服务器信息的工具（如社区设定搜索）使用
+                tool_args["guild_id"] = str(guild_id)
 
             if user_name is not None:
                 tool_args["user_name"] = user_name

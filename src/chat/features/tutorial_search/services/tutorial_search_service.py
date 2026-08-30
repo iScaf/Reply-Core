@@ -241,10 +241,16 @@ class TutorialSearchService:
 
         final_parent_docs: List[Dict[str, str]] = []
         try:
-            # 获取当前帖子的搜索模式
-            current_search_mode = await thread_settings_service.get_search_mode(
-                str(thread_id)
-            )
+            # 获取当前帖子的搜索模式。
+            # 无帖子上下文（频道聊天 / Web 控制台）时使用 PRIORITY：
+            # 全库检索且退化为纯 RRF 排序；若沿用默认 ISOLATED，
+            # SQL 会排除所有帖内教程（仅剩 thread_id 为 NULL 的基础库）。
+            if thread_id is not None:
+                current_search_mode = await thread_settings_service.get_search_mode(
+                    str(thread_id)
+                )
+            else:
+                current_search_mode = "PRIORITY"
             log.info(f"帖子 {thread_id} 的搜索模式: {current_search_mode}")
 
             async with AsyncSessionLocal() as session:

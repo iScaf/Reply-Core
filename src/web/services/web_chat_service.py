@@ -6,6 +6,7 @@ Web 问答演示服务。
 检索上下文预注入 + 完整 search 工具 + 工具调用循环；AI 不可用时降级为仅返回检索结果。
 """
 import logging
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,12 @@ from src.chat.services.ai.providers.base import GenerationConfig
 log = logging.getLogger(__name__)
 
 TOOL_ITERATIONS = 3
+
+# Web 端无 Discord 频道上下文，社区设定检索（community_settings scope）
+# 需要 guild_id 才能执行；取 .env 中配置的开发服务器 ID
+_GUILD_ID: Optional[int] = None
+if os.getenv("GUILD_ID", "").isdigit():
+    _GUILD_ID = int(os.getenv("GUILD_ID"))
 
 SYSTEM_PROMPT = """你是 {bot_name}，{community_name} 的 AI 知识库助手。{self_intro}
 
@@ -111,6 +118,7 @@ class WebChatService:
                 user_name="Web管理员",
                 fallback_query=message,
                 channel_context=None,
+                guild_id=_GUILD_ID,
             )
             func_resp = getattr(part, "function_response", None)
             captured = getattr(func_resp, "response", None) or {}
