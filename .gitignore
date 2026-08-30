@@ -307,3 +307,5 @@ src/chat/features/games/blackjack-web/vite.config.ts
 tutorial/
 
 AGENTS.md
+# IDE
+.idea/
