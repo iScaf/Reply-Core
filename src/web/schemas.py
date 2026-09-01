@@ -15,7 +15,7 @@ class RejectRequest(BaseModel):
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
-    scope: Literal["tutorials", "community_settings", "all"] = "all"
+    scope: Literal["tutorials", "community_settings", "user_chat", "all"] = "all"
     top_k: int = Field(default=10, ge=1, le=50)
 
 
@@ -27,7 +27,7 @@ class ChatHistoryItem(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     history: List[ChatHistoryItem] = Field(default_factory=list, max_length=20)
-    scope: Literal["tutorials", "community_settings", "all"] = "all"
+    scope: Literal["tutorials", "community_settings", "user_chat", "all"] = "all"
 
 
 class SearchResultItem(BaseModel):

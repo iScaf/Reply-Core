@@ -1091,3 +1091,26 @@ class DailyStat(Base):
 
     def __repr__(self):
         return f"<DailyStat(date='{self.stat_date}')>"
+
+
+class WebChatMessage(Base):
+    """Web 问答演示的聊天记录持久化（每行一条 user/assistant 消息）"""
+
+    __tablename__ = "web_chat_messages"
+    __table_args__ = (
+        Index("ix_web_chat_created_at", "created_at"),
+        {"schema": BOT_SCHEMA},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    role = Column(String(20), nullable=False, comment="user / assistant")
+    content = Column(Text, nullable=False, comment="消息正文")
+    tool_trace = Column(JSON, nullable=True, comment="assistant 消息关联的工具调用轨迹")
+    model = Column(String(200), nullable=True, comment="生成使用的模型")
+    elapsed_ms = Column(Integer, nullable=True, comment="总耗时（毫秒）")
+    prompt_tokens = Column(Integer, nullable=True, comment="输入 token 数（来自 API usage）")
+    completion_tokens = Column(Integer, nullable=True, comment="输出 token 数（来自 API usage）")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<WebChatMessage(id={self.id}, role='{self.role}')>"

@@ -12,7 +12,7 @@ OpenAI Compatible Provider - 支持所有 OpenAI 兼容端点
 import os
 import json
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, AsyncGenerator
 
 import httpx
 
@@ -200,6 +200,133 @@ class OpenAICompatibleProvider(BaseProvider):
             log.error(f"OpenAI Compatible 生成错误: {e}", exc_info=True)
             raise GenerationError(
                 f"OpenAI Compatible 生成错误: {e}",
+                provider_type=self.provider_type,
+                original_error=e,
+            )
+
+    async def stream_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        config: Optional[GenerationConfig] = None,
+        tools: Optional[List[Any]] = None,
+        model: Optional[str] = None,
+        **kwargs,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        流式生成（OpenAI 兼容 SSE 协议），供 Web 问答演示使用。
+
+        逐段产出事件字典：
+          {"type": "reasoning", "delta": str}   思维链增量（reasoning_content）
+          {"type": "content",  "delta": str}    正文增量
+          {"type": "tool_calls", "tool_calls": [{id,name,arguments}]}  轮末请求调用工具
+          {"type": "finish"}                    正常结束（无工具调用）
+
+        Args:
+            messages: 对话消息列表
+            config: 生成配置
+            tools: 工具列表
+            model: 模型名称
+        """
+        if not self.api_key:
+            raise ProviderNotAvailableError("未配置 API 密钥")
+
+        config = config or GenerationConfig()
+        model_name = model or self.default_model
+        request_body = self._build_request_body(messages, config, tools, model_name)
+        request_body["stream"] = True
+        # 兼容端点支持时，最后一个分片会携带 usage（token 真值）
+        request_body["stream_options"] = {"include_usage": True}
+
+        # 流式 tool_calls 聚合缓冲：index -> {id, name, arguments 分片拼接}
+        pending_calls: Dict[int, Dict[str, Any]] = {}
+
+        try:
+            client = self._get_client()
+            async with client.stream(
+                "POST",
+                "/chat/completions",
+                json=request_body,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:"):].strip()
+                    if not payload or payload == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+
+                    # usage 通常出现在 choices 为空的最后一个分片
+                    usage = chunk.get("usage")
+                    if usage:
+                        yield {
+                            "type": "usage",
+                            "prompt_tokens": usage.get("prompt_tokens"),
+                            "completion_tokens": usage.get("completion_tokens"),
+                        }
+
+                    choices = chunk.get("choices") or []
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    delta = choice.get("delta") or {}
+
+                    reasoning = delta.get("reasoning_content")
+                    if reasoning:
+                        yield {"type": "reasoning", "delta": reasoning}
+
+                    content = delta.get("content")
+                    if content:
+                        yield {"type": "content", "delta": content}
+
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        slot = pending_calls.setdefault(
+                            idx, {"id": "", "name": "", "arguments": ""}
+                        )
+                        if tc.get("id"):
+                            slot["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            slot["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            slot["arguments"] += fn["arguments"]
+
+                    finish_reason = choice.get("finish_reason")
+                    if finish_reason == "tool_calls" and pending_calls:
+                        tool_calls_list = []
+                        for idx in sorted(pending_calls):
+                            slot = pending_calls[idx]
+                            try:
+                                arguments = json.loads(slot["arguments"] or "{}")
+                            except json.JSONDecodeError:
+                                arguments = {}
+                            tool_calls_list.append(
+                                {
+                                    "id": slot["id"],
+                                    "name": slot["name"],
+                                    "arguments": arguments,
+                                }
+                            )
+                        yield {"type": "tool_calls", "tool_calls": tool_calls_list}
+                        return
+                    if finish_reason == "stop":
+                        yield {"type": "finish"}
+                        return
+            # 流结束但未显式给出 finish_reason（部分兼容端点行为）
+            yield {"type": "finish"}
+        except httpx.HTTPStatusError as e:
+            raise GenerationError(
+                f"OpenAI Compatible 流式 API 错误: {e.response.text}",
+                provider_type=self.provider_type,
+                original_error=e,
+            )
+        except httpx.RequestError as e:
+            raise GenerationError(
+                f"OpenAI Compatible 流式请求失败: {e}",
                 provider_type=self.provider_type,
                 original_error=e,
             )
