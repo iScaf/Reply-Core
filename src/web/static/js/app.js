@@ -197,6 +197,42 @@
       state.q = $('q-' + prefix).value.trim(); refresh(1);
     });
 
+    // 教程库视图：上传文档（md/pdf/docx/xlsx → 解析 → 切块 → 向量化）
+    if (source === 'tutorials') {
+      const statusBox = $('upload-status-tutorials');
+      const fileInput = $('file-tutorials');
+      function showStatus(text, isError) {
+        statusBox.style.display = '';
+        statusBox.className = isError ? 'state-no' : 'table-empty';
+        statusBox.textContent = text;
+      }
+      $('upload-tutorials').addEventListener('click', function () { fileInput.click(); });
+      fileInput.addEventListener('change', async function () {
+        const file = fileInput.files[0];
+        fileInput.value = '';
+        if (!file) return;
+        if (file.size > 10 * 1024 * 1024) { showStatus('文件超过 10MB 限制', true); return; }
+        showStatus('正在上传并解析「' + file.name + '」…（大文件的切块与向量化需要一些时间）');
+        try {
+          const form = new FormData();
+          form.append('file', file);
+          const resp = await fetch('/api/documents/tutorials/upload', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: form,
+          });
+          const data = await resp.json().catch(function () { return null; });
+          if (resp.status === 401) { showStatus('未认证，请重新登录', true); return; }
+          if (!resp.ok) throw new Error((data && data.detail) || ('上传失败 ' + resp.status));
+          showStatus('入库成功：' + data.title
+            + '（可检索块 ' + data.chunk_count + ' · 节级父块 ' + data.parent_count + '）');
+          refresh(1);
+        } catch (e) {
+          showStatus('上传失败: ' + e.message, true);
+        }
+      });
+    }
+
     return { refresh: function () { refresh(state.page || 1); } };
   }
   const docViews = {
@@ -205,7 +241,14 @@
   };
 
   /* ================= 文档详情弹层 ================= */
+  const docModalState = { source: null, id: null };
+
   async function openDoc(source, id) {
+    docModalState.source = source;
+    docModalState.id = id;
+    // 教程库提供编辑/重传/删除操作
+    $('dmActions').style.display = source === 'tutorials' ? '' : 'none';
+    setDocModalMode('view');
     try {
       const d = await api('/api/documents/' + source + '/' + id);
       $('dmTitle').textContent = (source === 'tutorials' ? 'T-' : 'C-') + d.id + ' ' + (d.title || '（无标题）');
@@ -224,6 +267,79 @@
       alert('加载文档详情失败: ' + e.message);
     }
   }
+
+  function setDocModalMode(mode) {
+    const editing = mode === 'edit';
+    $('dmViewMode').style.display = editing ? 'none' : '';
+    $('dmEditMode').style.display = editing ? '' : 'none';
+    $('dmChunksHeading').style.display = editing ? 'none' : '';
+    $('dmChunks').style.display = editing ? 'none' : '';
+    $('dmSave').style.display = editing ? '' : 'none';
+    $('dmCancel').style.display = editing ? '' : 'none';
+    $('dmActions').style.display = (!editing && docModalState.source === 'tutorials') ? '' : 'none';
+  }
+
+  $('dmEdit').addEventListener('click', function () {
+    $('dmTitleInput').value = ($('dmTitle').textContent || '').replace(/^T-\d+\s*/, '');
+    $('dmContentInput').value = $('dmFulltext').textContent || '';
+    setDocModalMode('edit');
+  });
+  $('dmCancel').addEventListener('click', function () { setDocModalMode('view'); });
+  $('dmSave').addEventListener('click', async function () {
+    try {
+      $('dmSave').disabled = true;
+      $('dmSave').textContent = '保存并重新向量化…';
+      const r = await api('/api/documents/tutorials/' + docModalState.id, {
+        method: 'PUT',
+        body: {
+          title: $('dmTitleInput').value,
+          content: $('dmContentInput').value,
+        },
+      });
+      alert('已保存：可检索块 ' + r.chunk_count + ' · 节级父块 ' + r.parent_count);
+      setDocModalMode('view');
+      openDoc('tutorials', docModalState.id);
+      docViews.tutorials.refresh();
+    } catch (e) {
+      alert('保存失败: ' + e.message);
+    } finally {
+      $('dmSave').disabled = false;
+      $('dmSave').textContent = '保存';
+    }
+  });
+  $('dmReupload').addEventListener('click', function () { $('dmReuploadFile').click(); });
+  $('dmReuploadFile').addEventListener('change', async function () {
+    const file = this.files[0];
+    this.value = '';
+    if (!file || docModalState.id == null) return;
+    if (!confirm('重新上传将替换「' + file.name + '」的内容并重新向量化，标题保持不变。继续？')) return;
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const resp = await fetch('/api/documents/tutorials/' + docModalState.id + '/reupload', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: form,
+      });
+      const data = await resp.json().catch(function () { return null; });
+      if (!resp.ok) throw new Error((data && data.detail) || ('上传失败 ' + resp.status));
+      alert('已重新上传：可检索块 ' + data.chunk_count + ' · 节级父块 ' + data.parent_count);
+      openDoc('tutorials', docModalState.id);
+      docViews.tutorials.refresh();
+    } catch (e) {
+      alert('重新上传失败: ' + e.message);
+    }
+  });
+  $('dmDelete').addEventListener('click', async function () {
+    if (!confirm('确定删除该教程及其全部分块？此操作不可恢复。')) return;
+    try {
+      await api('/api/documents/tutorials/' + docModalState.id, { method: 'DELETE' });
+      closeDoc();
+      docViews.tutorials.refresh();
+    } catch (e) {
+      alert('删除失败: ' + e.message);
+    }
+  });
   $('dmClose').addEventListener('click', closeDoc);
   $('docModal').addEventListener('click', function (e) { if (e.target === this) closeDoc(); });
   function closeDoc() { $('docModal').classList.add('hidden'); }
@@ -287,7 +403,7 @@
       waiting.remove();
       if (data.model) $('chatModelTag').textContent = 'model: ' + data.model;
 
-      let html = linkCitations(data.reply || '', data.citations);
+      let html = mdRender(data.reply || '', data.citations);
       if (data.tool_trace && data.tool_trace.length) {
         html += '<div class="tool-trace">'
           + data.tool_trace.map(function (t) {
@@ -298,7 +414,7 @@
       if (data.degraded) {
         html += '<div class="degrade-note">⚠ 已降级为仅检索结果：' + esc(data.degrade_reason || '') + '</div>';
       }
-      pushMsg('bot', html);
+      pushMsg('bot', html, { markdown: true });
       chatHistory.push({ role: 'user', content: text });
       if (data.reply) chatHistory.push({ role: 'assistant', content: data.reply });
     } catch (e) {
@@ -308,20 +424,34 @@
       send.disabled = false;
     }
   }
-  function pushMsg(role, html) {
+  function pushMsg(role, html, opts) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
+    const bubbleCls = 'bubble' + (opts && opts.markdown ? ' md' : '');
     div.innerHTML = '<div class="who"' + (role === 'user' ? ' style="text-align:right"' : '') + '>'
       + (role === 'user' ? '管理员' : '秒回喵 · Reply-Core') + '</div>'
-      + '<div class="bubble">' + html + '</div>';
+      + '<div class="' + bubbleCls + '">' + html + '</div>';
     const box = $('chatMsgs');
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
     return div;
   }
-  /* 把回复中的 [资料N] 替换为引用徽章（悬停显示来源标题） */
-  function linkCitations(reply, citations) {
-    return esc(reply).replace(/\[资料(\d+)\]/g, function (m, n) {
+  /* Markdown 渲染：marked 解析 → DOMPurify 净化（防 XSS）→ 引用徽章替换。
+     库未加载时降级为纯文本（转义 + 换行）。 */
+  function mdRender(text, citations) {
+    let html;
+    if (window.marked && window.DOMPurify) {
+      marked.setOptions({ breaks: true, gfm: true });
+      html = DOMPurify.sanitize(marked.parse(text || ''));
+    } else {
+      html = esc(text).replace(/\n/g, '<br>');
+    }
+    return linkCitations(html, citations);
+  }
+  /* 把回复中的 [资料N] 替换为引用徽章（悬停显示来源标题）。
+     输入应为已转义/已净化的 HTML，不做二次转义。 */
+  function linkCitations(html, citations) {
+    return html.replace(/\[资料(\d+)\]/g, function (m, n) {
       const c = citations[Number(n) - 1];
       const tip = c ? ' title="' + esc(c.title) + '"' : '';
       return '<span class="cite"' + tip + '>资料' + n + '</span>';

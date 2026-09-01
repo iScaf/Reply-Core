@@ -106,22 +106,44 @@ tbody tr:hover { background:var(--row-hover); }
 .state-pend { color:var(--bm25); font-size:11px; }
 .table-empty { text-align:center; color:var(--dim); font-size:12px; padding:22px 0!important; }
 
+/* ---------- 文档详情弹层：操作行与编辑模式 ---------- */
+.dm-actions { display:flex; gap:8px; margin:10px 0 4px; }
+.dm-actions .btn { font-size:11px; padding:5px 12px; }
+.dm-actions .btn:hover { border-color:var(--vec); }
+#dmTitleInput, #dmContentInput {
+  width:100%; box-sizing:border-box;
+  background:var(--panel-2); border:1px solid var(--line); border-radius:6px;
+  color:var(--text); font-family:var(--mono); font-size:12px;
+  padding:9px 12px; margin:6px 0 12px;
+}
+#dmContentInput { resize:vertical; line-height:1.7; min-height:280px; }
+#dmTitleInput:focus, #dmContentInput:focus { border-color:var(--vec); outline:none; }
+
 /* ---------- 自定义下拉框（适配双主题，替代原生控件外观） ---------- */
 select.scope-select, .chat-scope select, .modal select {
   -webkit-appearance:none; appearance:none;
   background-color:var(--panel-2);
   color:var(--text);
-  border:1px solid var(--line); border-radius:4px;
+  border:1px solid var(--line); border-radius:8px;
   font-family:var(--mono); font-size:12px;
-  padding:8px 30px 8px 12px;
+  padding:9px 34px 9px 14px;
   background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238a94a6' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat:no-repeat;
-  background-position:right 10px center;
+  background-position:right 12px center;
   cursor:pointer;
+  transition:border-color .15s ease;
 }
-select.scope-select:hover, .chat-scope select:hover, .modal select:hover { border-color:var(--vec); }
-select.scope-select:focus, .chat-scope select:focus, .modal select:focus { border-color:var(--vec); outline:none; }
+/* 聚焦/展开时边框与默认展示保持一致，不做变色强调 */
+select.scope-select:hover, .chat-scope select:hover, .modal select:hover,
+select.scope-select:focus, .chat-scope select:focus, .modal select:focus {
+  border-color:var(--line); outline:none;
+}
 select.scope-select:disabled { opacity:.5; cursor:wait; }
+/* 下拉选项适配双主题（原生 option 仅支持有限样式） */
+select.scope-select option, .chat-scope select option, .modal select option {
+  background:var(--panel);
+  color:var(--text);
+}
 
 /* ---------- 视图切换 ---------- */
 .hidden { display:none !important; }
@@ -175,6 +197,43 @@ select.scope-select:disabled { opacity:.5; cursor:wait; }
 .msg.user .bubble { background:var(--user-bubble-bg); border:1px solid var(--user-bubble-border); border-bottom-right-radius:2px; font-family:var(--sans); }
 .msg.bot .bubble { background:var(--panel); border:1px solid var(--line); border-bottom-left-radius:2px; font-family:var(--sans); }
 .msg.bot.degraded .bubble { border-color:var(--warn-dim-border); }
+
+/* ---------- 气泡内 Markdown 渲染样式（bot 消息） ---------- */
+.msg .bubble.md { white-space:normal; line-height:1.65; }
+.msg .bubble.md > :first-child { margin-top:0; }
+.msg .bubble.md > :last-child { margin-bottom:0; }
+.msg .bubble.md h1, .msg .bubble.md h2, .msg .bubble.md h3,
+.msg .bubble.md h4, .msg .bubble.md h5, .msg .bubble.md h6 {
+  margin:14px 0 6px; line-height:1.35; color:var(--text);
+}
+.msg .bubble.md h1 { font-size:16px; }
+.msg .bubble.md h2 { font-size:14.5px; }
+.msg .bubble.md h3, .msg .bubble.md h4 { font-size:13px; }
+.msg .bubble.md h5, .msg .bubble.md h6 { font-size:12.5px; }
+.msg .bubble.md p { margin:6px 0; }
+.msg .bubble.md ul, .msg .bubble.md ol { margin:6px 0; padding-left:20px; }
+.msg .bubble.md li { margin:3px 0; }
+.msg .bubble.md code {
+  background:var(--panel-2); border:1px solid var(--line); border-radius:4px;
+  padding:1px 5px; font-family:var(--mono); font-size:11.5px;
+}
+.msg .bubble.md pre {
+  background:var(--panel-2); border:1px solid var(--line); border-radius:6px;
+  padding:10px 12px; overflow-x:auto; margin:8px 0;
+}
+.msg .bubble.md pre code { background:none; border:none; padding:0; font-size:11.5px; line-height:1.6; }
+.msg .bubble.md table { border-collapse:collapse; margin:8px 0; font-size:11.5px; width:100%; }
+.msg .bubble.md th, .msg .bubble.md td {
+  border:1px solid var(--line); padding:5px 8px; text-align:left;
+}
+.msg .bubble.md th { background:var(--panel-2); }
+.msg .bubble.md blockquote {
+  margin:8px 0; padding:2px 12px; color:var(--dim);
+  border-left:3px solid var(--line);
+}
+.msg .bubble.md a { color:var(--vec); }
+.msg .bubble.md hr { border:none; border-top:1px solid var(--line); margin:10px 0; }
+.msg .bubble.md img { max-width:100%; border-radius:6px; }
 .cite { display:inline-block; font-size:10px; font-family:var(--mono); color:var(--vec); background:var(--vec-dim-bg); border:1px solid var(--vec-dim-border); border-radius:3px; padding:0 4px; margin:0 2px; vertical-align:1px; }
 .tool-trace { margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); font-size:10px; color:var(--dim); font-family:var(--mono); line-height:1.8; }
 .tool-trace b { color:var(--vec); font-weight:normal; }
@@ -185,6 +244,6 @@ select.scope-select:disabled { opacity:.5; cursor:wait; }
 .chat-input button { background:transparent; border:1px solid var(--line); border-radius:4px; color:var(--vec); padding:0 12px; }
 .chat-input button:disabled { opacity:.5; }
 .chat-scope { padding:0 14px 10px; display:flex; gap:6px; align-items:center; font-size:10px; color:var(--dim); }
-.chat-scope select { background:var(--panel); border:1px solid var(--line); border-radius:4px; color:var(--text); font-size:11px; padding:3px 6px; }
+.chat-scope select { background:var(--panel); border:1px solid var(--line); border-radius:8px; color:var(--text); font-size:11px; padding:4px 26px 4px 10px; }
 
 @media (prefers-reduced-motion: reduce) { * { animation:none!important; transition:none!important; } }

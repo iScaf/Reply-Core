@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>秒回喵 // 检索观测台</title>
-<link rel="stylesheet" href="/static/css/base.css">
-<link rel="stylesheet" href="/static/css/theme-warm.css">
-<link rel="stylesheet" href="/static/css/console.css">
+<link rel="stylesheet" href="/static/css/base.css?v=20260901b">
+<link rel="stylesheet" href="/static/css/theme-warm.css?v=20260901b">
+<link rel="stylesheet" href="/static/css/console.css?v=20260901b">
 <script>
   /* 防闪烁：在样式渲染前先恢复上次选择的主题 */
   try { if (localStorage.getItem('rc-theme') === 'warm') document.documentElement.dataset.theme = 'warm'; } catch (e) {}
@@ -106,7 +106,10 @@
         <div class="doc-toolbar">
           <input id="q-tutorials" placeholder="按标题/正文搜索…（回车执行）">
           <button class="btn" id="reload-tutorials">刷新</button>
+          <button class="btn" id="upload-tutorials">上传文档</button>
+          <input type="file" id="file-tutorials" accept=".md,.pdf,.docx,.xlsx" class="hidden">
         </div>
+        <div id="upload-status-tutorials" class="table-empty" style="display:none"></div>
         <table>
           <thead><tr><th>编号</th><th>标题</th><th>分类</th><th>chunks</th><th>更新</th></tr></thead>
           <tbody id="tbody-tutorials"></tbody>
@@ -169,16 +172,36 @@
   <div class="modal">
     <h3 id="dmTitle">—</h3>
     <div class="meta" id="dmMeta"></div>
-    <h4>全文</h4>
-    <div class="fulltext" id="dmFulltext"></div>
-    <h4>分块（chunks）</h4>
+    <div class="dm-actions" id="dmActions">
+      <button class="btn" id="dmEdit">编辑</button>
+      <button class="btn" id="dmReupload">重新上传</button>
+      <button class="btn" id="dmDelete">删除</button>
+      <input type="file" id="dmReuploadFile" accept=".md,.pdf,.docx,.xlsx" class="hidden">
+    </div>
+    <div id="dmViewMode">
+      <h4>全文</h4>
+      <div class="fulltext" id="dmFulltext"></div>
+    </div>
+    <div id="dmEditMode" style="display:none">
+      <h4>编辑（Markdown，保存后自动重新切块向量化）</h4>
+      <input id="dmTitleInput" placeholder="标题">
+      <textarea id="dmContentInput" rows="16" placeholder="正文（Markdown）"></textarea>
+    </div>
+    <h4 id="dmChunksHeading">分块（chunks）</h4>
     <div id="dmChunks"></div>
-    <div class="close-row"><button class="btn" id="dmClose">关闭</button></div>
+    <div class="close-row">
+      <button class="btn" id="dmSave" style="display:none">保存</button>
+      <button class="btn" id="dmCancel" style="display:none">取消</button>
+      <button class="btn" id="dmClose">关闭</button>
+    </div>
   </div>
 </div>
 
-<script src="/static/js/theme.js"></script>
-<script src="/static/js/api.js"></script>
-<script src="/static/js/app.js"></script>
+<!-- 静态资源版本号（cache-busting）：改动前端 JS/CSS 后请同步升级 v 参数，强制浏览器拉取新文件 -->
+<script src="/static/js/vendor/marked.min.js"></script>
+<script src="/static/js/vendor/purify.min.js"></script>
+<script src="/static/js/theme.js?v=20260901c"></script>
+<script src="/static/js/api.js?v=20260901c"></script>
+<script src="/static/js/app.js?v=20260901c"></script>
 </body>
 </html>

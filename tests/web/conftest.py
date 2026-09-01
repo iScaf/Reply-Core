@@ -116,6 +116,52 @@ def clean_db():
 
 @pytest.fixture
 def clean_community_knowledge():
-    """知识库主数据不在全局清空范围，定向清理（CASCADE 级联 chunks）"""
+    """快照精确清理：只删除测试期间新创建的社区设定文档及其 chunks。
+
+    community_settings.documents 是知识库主数据，测试严禁整表清空——
+    fixture 开始前记录已有文档 id，结束后仅删除新增部分（CASCADE 清 chunks）。
+    """
+    def _snapshot(factory):
+        async def inner(session):
+            rows = await session.execute(
+                text("SELECT id FROM community_settings.documents")
+            )
+            return {r[0] for r in rows.fetchall()}
+
+        async def flow():
+            async with factory() as session:
+                return await inner(session)
+
+        return flow()
+
+    before = run_db(_snapshot)
     yield
-    truncate_tables(["community_settings.documents"])
+    after = run_db(_snapshot)
+    created = after - before
+    if not created:
+        return
+    id_list = ", ".join(str(int(i)) for i in created)
+
+    def _do(factory):
+        async def inner(session):
+            await session.execute(
+                text(
+                    f"DELETE FROM community_settings.chunks "
+                    f"WHERE document_id IN ({id_list})"
+                )
+            )
+            await session.execute(
+                text(
+                    f"DELETE FROM community_settings.documents "
+                    f"WHERE id IN ({id_list})"
+                )
+            )
+
+        async def flow():
+            async with factory() as session:
+                async with session.begin():
+                    await inner(session)
+
+        return flow()
+
+    run_db(_do)
