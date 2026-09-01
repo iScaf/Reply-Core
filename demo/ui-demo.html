@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UI 美化 Demo v2 · 棱彩星与动画方案</title>
+<script src="gsap.min.js"></script>
+<style>
+  :root {
+    --bg:#0A0E14; --panel:#131A24; --panel2:#1E2A38; --line:#2A3646;
+    --text:#E6EDF3; --dim:#8A94A6; --vec:#57C7FF; --bm25:#FF8A5C; --rrf:#7EE0A3; --gold:#F5C97B;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Consolas","Microsoft YaHei",monospace; padding:32px; }
+  h1 { font-size:20px; letter-spacing:2px; } h1::before { content:"// "; color:var(--vec); }
+  h2 { font-size:15px; letter-spacing:2px; color:var(--dim); margin:44px 0 14px; } h2::before { content:"## "; color:var(--gold); }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:8px; }
+  .note { background:var(--panel2); border:1px dashed var(--line); border-radius:8px; padding:12px 16px; font-size:12px; color:var(--dim); line-height:1.8; }
+  .badge { display:inline-block; font-size:10px; border:1px solid var(--gold); color:var(--gold); border-radius:10px; padding:0 8px; margin-left:6px; }
+  .btn { background:var(--panel2); border:1px solid var(--line); color:var(--text); border-radius:6px; padding:6px 14px; font-size:12px; cursor:pointer; font-family:inherit; }
+  .btn:hover { border-color:var(--vec); color:var(--vec); }
+  .hint { font-size:11px; color:var(--dim); margin:8px 0 14px; line-height:1.7; }
+
+  /* 棱彩星 */
+  .star-wrap { display:flex; gap:26px; flex-wrap:wrap; }
+  .star-card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:22px 30px; text-align:center; cursor:pointer; }
+  .star-card.selected { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold); }
+  .star-card .name { font-size:12px; margin-top:10px; color:var(--text); }
+  .star-card .desc { font-size:10.5px; color:var(--dim); margin-top:3px; }
+  .gem { width:84px; height:84px; }
+
+  /* 菜单折叠 demo */
+  .mini-app { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; height:320px; background:var(--bg); }
+  .mini-nav { width:170px; background:var(--panel2); border-right:1px solid var(--line); flex-shrink:0; overflow:hidden; }
+  .nav-top { display:flex; justify-content:flex-end; padding:10px 10px 4px; }
+  .icon-btn { width:30px; height:30px; border-radius:7px; background:var(--panel); border:1px solid var(--line); cursor:pointer; display:grid; place-items:center; color:var(--dim); }
+  .icon-btn:hover { color:var(--vec); border-color:var(--vec); }
+  .icon-btn svg { width:15px; height:15px; }
+  .mini-item { padding:7px 10px; border-radius:5px; font-size:12px; margin:0 8px 4px; white-space:nowrap; }
+  .mini-item.active { background:var(--panel); border:1px solid var(--line); }
+  .mini-item .k { color:var(--vec); font-size:10px; margin-right:8px; }
+  .mini-main { flex:1; padding:16px; position:relative; }
+  .mini-drawer { position:absolute; right:0; top:0; bottom:0; width:180px; background:var(--panel2); border-left:1px solid var(--line); padding:12px; font-size:11px; color:var(--dim); }
+  .gem-toggle { width:34px; height:34px; cursor:pointer; flex-shrink:0; }
+  .hint2 { font-size:11px; color:var(--dim); margin-top:10px; }
+
+  /* 动画 demo */
+  .demo-row { display:flex; gap:14px; flex-wrap:wrap; }
+  .demo-box { flex:1; min-width:280px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .demo-box h3 { font-size:13px; margin:0 0 4px; } h3::before { content:"▸ "; color:var(--bm25); }
+  .demo-box p { font-size:11px; color:var(--dim); margin:4px 0 12px; line-height:1.6; }
+  .stat { display:flex; gap:10px; margin:10px 0; }
+  .stat .st { flex:1; background:var(--panel2); border:1px solid var(--line); border-radius:6px; padding:8px 10px; }
+  .stat .v { font-size:18px; color:var(--rrf); } .stat .l { font-size:10px; color:var(--dim); }
+  .bar-track { height:9px; background:var(--panel2); border-radius:4px; margin:6px 0 10px; overflow:hidden; }
+  .bar-fill { height:100%; width:0; border-radius:4px; }
+  .chips { display:flex; gap:8px; margin:10px 0; flex-wrap:wrap; }
+  .chip { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:12px; }
+  .ok { color:var(--rrf); }
+</style>
+</head>
+<body>
+
+<h1>UI 美化 Demo v2 · 棱彩星 + 动画方案（A/B）</h1>
+<div class="note">仍为<b>独立演示页</b>。本轮更新：① 猫咪全部换成 <b>Gemini 官方同款渐变棱彩四角星</b>（官方色值 #439DDF→#9476C5→#D6645D，自绘矢量、透明背景）② 动画仅保留 A/B ③ 折叠按钮改为<b>仅图标、置于左栏右上角</b>。</div>
+
+<h2>一、棱彩星候选（问答演示的隐藏/展开开关图标）</h2>
+<div class="sub">左：待机态（呼吸缩放 + 光泽扫过）；中：抽屉隐藏态（降透明 + 旋转 45°）；右：多尺寸预览（顶栏 20px / 抽屉 34px）。</div>
+<div class="star-wrap">
+  <div class="star-card selected">
+    <svg class="gem" viewBox="0 0 100 100"><defs>
+      <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#439DDF"/><stop offset="30%" stop-color="#4F87ED"/>
+        <stop offset="55%" stop-color="#9476C5"/><stop offset="78%" stop-color="#BC688E"/>
+        <stop offset="100%" stop-color="#D6645D"/>
+      </linearGradient></defs>
+      <path fill="url(#g1)" d="M50 0 C55 28 72 45 100 50 C72 55 55 72 50 100 C45 72 28 55 0 50 C28 45 45 28 50 0 Z"/>
+    </svg>
+    <div class="name">待机态（呼吸 + 微转）</div>
+    <div class="desc">问答抽屉展开时显示</div>
+  </div>
+  <div class="star-card">
+    <svg class="gem" viewBox="0 0 100 100" style="opacity:.35; transform:rotate(45deg);"><defs>
+      <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#439DDF"/><stop offset="55%" stop-color="#9476C5"/>
+        <stop offset="100%" stop-color="#D6645D"/></linearGradient></defs>
+      <path fill="url(#g2)" d="M50 0 C55 28 72 45 100 50 C72 55 55 72 50 100 C45 72 28 55 0 50 C28 45 45 28 50 0 Z"/>
+    </svg>
+    <div class="name">隐藏态（降透明 + 转 45°）</div>
+    <div class="desc">抽屉收起时显示，提示可再点开</div>
+  </div>
+  <div class="star-card">
+    <div style="display:flex; gap:14px; align-items:flex-end; height:84px;">
+      <svg class="gem" viewBox="0 0 100 100" style="width:20px;height:20px;"><path fill="url(#g1)" d="M50 0 C55 28 72 45 100 50 C72 55 55 72 50 100 C45 72 28 55 0 50 C28 45 45 28 50 0 Z"/></svg>
+      <svg class="gem" viewBox="0 0 100 100" style="width:34px;height:34px;"><path fill="url(#g1)" d="M50 0 C55 28 72 45 100 50 C72 55 55 72 50 100 C45 72 28 55 0 50 C28 45 45 28 50 0 Z"/></svg>
+      <svg class="gem" viewBox="0 0 100 100" style="width:60px;height:60px;"><path fill="url(#g1)" d="M50 0 C55 28 72 45 100 50 C72 55 55 72 50 100 C45 72 28 55 0 50 C28 45 45 28 50 0 Z"/></svg>
+    </div>
+    <div class="name">多尺寸</div>
+    <div class="desc">20px 顶栏 / 34px 默认 / 60px 预览</div>
+  </div>
+</div>
+
+<h2>二、左栏折叠按钮 + 问答抽屉隐藏（交互演示）</h2>
+<div class="hint">折叠按钮（仅图标 ☰）位于<b>左栏内部右上角</b>；点击后左栏收起成窄条，按钮仍钉在窄条右上角用于展开。问答抽屉由<b>棱彩星</b>开关控制。</div>
+<div class="mini-app" id="miniApp">
+  <div class="mini-nav" id="miniNav">
+    <div class="nav-top">
+      <div class="icon-btn" id="navToggle" title="折叠/展开菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/>
+        </svg>
+      </div>
+    </div>
+    <div class="mini-item active"><span class="k">01</span>检索测试台</div>
+    <div class="mini-item"><span class="k">02</span>教程库</div>
+    <div class="mini-item"><span class="k">03</span>社区设定</div>
+    <div class="mini-item"><span class="k">04</span>审核队列</div>
+    <div class="mini-item"><span class="k">05</span>用户信息</div>
+  </div>
+  <div class="mini-main">
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+      <svg class="gem-toggle" id="gemToggle" viewBox="0 0 100 100"><path fill="url(#g1)" d="M50 0 C55 28 72 45 100 50 C72 55 55 72 50 100 C45 72 28 55 0 50 C28 45 45 28 50 0 Z"/></svg>
+    </div>
+    <div style="font-size:11px; color:var(--dim);">主内容区（示意）—— 点棱彩星切换右侧抽屉</div>
+  </div>
+  <div class="mini-drawer" id="miniDrawer">
+    <b style="color:var(--text); font-size:12px;">问答演示</b>
+    <p style="line-height:1.7;">隐藏时整体滑出屏幕右缘并淡出，棱彩星同步降透明 + 旋转 45°；展开时弹性滑回。</p>
+  </div>
+</div>
+
+<h2>三、动画方案（已按你的选择保留 A / B）</h2>
+<div class="demo-row">
+  <div class="demo-box">
+    <h3>方案 A · 卡片波浪入场</h3>
+    <p>切换到教程库 / 检索台等视图时，卡片自下而上依次浮入（stagger 波浪），表格行跟随淡入。</p>
+    <div class="chips" id="animA">
+      <div class="chip">教程库</div><div class="chip">社区设定</div><div class="chip">审核队列</div><div class="chip">用户信息</div>
+    </div>
+    <button class="btn" onclick="playA()">▶ 播放</button>
+  </div>
+  <div class="demo-box">
+    <h3>方案 B · 统计数字滚动</h3>
+    <p>健康统计条 / vitals 的数字从 0 滚动到真实值（snap 取整），伴随一次轻微放大。</p>
+    <div class="stat">
+      <div class="st"><div class="v" id="n1">0</div><div class="l">教程文档</div></div>
+      <div class="st"><div class="v" id="n2">0</div><div class="l">向量块</div></div>
+    </div>
+    <button class="btn" onclick="playB()">▶ 播放</button>
+  </div>
+</div>
+
+<div class="note" style="margin-top:36px;">
+  ✅ 确认后回复我：棱彩星的两个状态样式是否 OK（或调整透明度/角度），即开始正式集成到 web 端。
+</div>
+
+<script>
+/* 棱彩星待机动画：呼吸缩放 + 缓慢微转 */
+gsap.to(".star-card.selected .gem", { scale: 1.08, duration: 1.4, yoyo: true, repeat: -1,
+  ease: "sine.inOut", transformOrigin: "center center" });
+gsap.to(".star-card.selected .gem path", { rotation: 8, svgOrigin: "50 50", duration: 2.4,
+  yoyo: true, repeat: -1, ease: "sine.inOut" });
+
+/* ================= 折叠按钮（左栏右上角，仅图标） ================= */
+let navOpen = true;
+document.getElementById("navToggle").addEventListener("click", function () {
+  navOpen = !navOpen;
+  gsap.to("#miniNav", { width: navOpen ? 170 : 44, duration: .45, ease: "back.out(1.6)" });
+  gsap.to("#miniNav .mini-item", { opacity: navOpen ? 1 : 0, x: navOpen ? 0 : -8, duration: .22 });
+});
+
+/* ================= 问答抽屉：棱彩星开关 ================= */
+let drawerOpen = true;
+const gemToggle = document.getElementById("gemToggle");
+gemToggle.addEventListener("click", function () {
+  drawerOpen = !drawerOpen;
+  if (drawerOpen) {
+    gsap.to(gemToggle, { opacity: 1, rotation: 0, scale: 1, duration: .5, ease: "back.out(1.6)" });
+    gsap.to("#miniDrawer", { x: 0, opacity: 1, duration: .55, ease: "back.out(1.5)" });
+  } else {
+    gsap.to(gemToggle, { opacity: .35, rotation: 45, scale: .85, duration: .4, ease: "power2.in" });
+    gsap.to("#miniDrawer", { x: 200, opacity: 0, duration: .45, ease: "power2.in" });
+  }
+});
+
+/* ================= 动画方案 A / B ================= */
+function playA() {
+  gsap.fromTo("#animA .chip", { y: 26, opacity: 0, scale: .92 },
+    { y: 0, opacity: 1, scale: 1, duration: .55, stagger: .12, ease: "back.out(1.7)" });
+}
+function playB() {
+  const targets = [{ v: "#n1", end: 2 }, { v: "#n2", end: 38 }];
+  targets.forEach(function (t) {
+    const o = { n: 0 };
+    gsap.to(o, { n: t.end, duration: 1.1, ease: "power2.out",
+      onUpdate: function () { document.querySelector(t.v).textContent = Math.round(o.n); } });
+    gsap.fromTo(t.v, { scale: .6 }, { scale: 1, duration: .5, ease: "back.out(2.5)", transformOrigin: "left center" });
+  });
+}
+playA(); playB();
+</script>
+</body>
+</html>
