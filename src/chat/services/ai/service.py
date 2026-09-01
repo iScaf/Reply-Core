@@ -1212,9 +1212,21 @@ class AIService:
 
         if isinstance(obj, dict):
             _seen.add(obj_id)
-            return {
-                k: AIService._serialize_for_logging(v, _seen) for k, v in obj.items()
-            }
+            serialized = {}
+            for k, v in obj.items():
+                # base64 图片/文件内容截断：只保留类型与长度摘要，避免日志膨胀
+                if (
+                    isinstance(v, str)
+                    and v.startswith("data:")
+                    and ";base64," in v
+                ):
+                    media_type = v[5 : v.index(";")]
+                    serialized[k] = (
+                        f"<{media_type} base64 truncated: {len(v)} chars>"
+                    )
+                    continue
+                serialized[k] = AIService._serialize_for_logging(v, _seen)
+            return serialized
         elif isinstance(obj, (list, tuple)):
             _seen.add(obj_id)
             return [AIService._serialize_for_logging(item, _seen) for item in obj]
