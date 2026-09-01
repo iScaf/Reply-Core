@@ -3,12 +3,15 @@ import logging
 
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.database.database import AsyncSessionLocal
+from src.database import database as db_mod
 from src.database.models import TutorialDocument, KnowledgeChunk
 from src.chat.services.embedding_factory import (
     get_embedding_service,
     get_embedding_column,
     is_vector_enabled,
+)
+from src.chat.features.tutorial_search.services.document_chunking import (
+    chunk_markdown,
 )
 from sqlalchemy.future import select
 
@@ -18,22 +21,30 @@ log = logging.getLogger(__name__)
 class TutorialRAGService:
     """
     负责处理作者提交教程后的RAG流程。
-    由于Discord模态框的长度限制，每个教程都是一个独立的、
-    大小合适的知识单元，因此不再进行文本分割。
-    一篇教程（父文档）在向量数据库中对应唯一一个条目（子文档）。
+
+    文本来源有两类：
+    - Discord 模态框提交的短教程：整篇为一块，无父子结构（与旧行为一致）
+    - Web 后台上传的文件：统一 Markdown 后按标题切分（面包屑）+
+      递归细切，长节拆"节级父块（无向量）+ 子块（有向量）"，
+      检索命中子块后回取父块（small-to-big）。
     """
 
     def __init__(self):
         """初始化服务"""
-        log.info("TutorialRAGService 已初始化（简化版，无文本分割）")
+        log.info("TutorialRAGService 已初始化（支持上传文档分块 small-to-big）")
 
     async def process_tutorial_document(self, document_id: int):
         """
-        为完整的教程文档内容生成单一向量，并将其作为唯一的块存入数据库。
+        为教程文档生成块并写入 knowledge_chunks。
+
+        Returns:
+            dict: {"chunk_count": 可检索块数, "parent_count": 父块数}；失败返回 None。
         """
-        log.info(f"开始为文档 ID {document_id} 处理简化的 RAG 流程...")
+        log.info(f"开始为文档 ID {document_id} 处理 RAG 流程...")
         try:
-            async with AsyncSessionLocal() as session:
+            # 延迟属性访问（而非模块级绑定）：Web 测试会替换 database 模块上的
+            # AsyncSessionLocal 以隔离事件循环，此处须在调用时取最新值
+            async with db_mod.AsyncSessionLocal() as session:
                 # 1. 查询父文档
                 doc_result = await session.execute(
                     select(TutorialDocument).where(TutorialDocument.id == document_id)
@@ -42,48 +53,99 @@ class TutorialRAGService:
 
                 if not document:
                     log.error(f"无法找到 ID 为 {document_id} 的教程文档。")
-                    return
+                    return None
 
-                # 2. 直接使用原始内容作为唯一的 "chunk"
                 content = document.original_content
                 if not content.strip():
                     log.warning(f"文档 {document_id} 的内容为空。")
-                    return
+                    return None
 
-                # 3. 检查向量模式是否启用
-                if not is_vector_enabled():
-                    log.debug(f"向量模式已禁用，跳过文档 {document_id} 的嵌入生成")
-                    return
-
-                # 4. 为完整内容生成一个嵌入
-                embedding_service = await get_embedding_service()
-                embedding = await embedding_service.generate_embedding(
-                    text=str(content), task_type="retrieval_document"
+                # 2. 检查向量模式是否启用（禁用时仍写文本块，保留 BM25 检索能力）
+                vector_enabled = is_vector_enabled()
+                embedding_service = (
+                    await get_embedding_service() if vector_enabled else None
                 )
+                embedding_col = await get_embedding_column() if vector_enabled else None
 
-                if not embedding:
-                    log.error(f"为文档 {document_id} 的内容生成嵌入失败。")
-                    return
-
-                # 5. 根据当前向量模式确定写入的 embedding 列
-                # （local 模式为 qwen_embedding 或 bge_embedding；
-                #  api 模式无对应存储列，仅写文本以保留 BM25 检索能力）
-                embedding_col = await get_embedding_column()
-                new_chunk = KnowledgeChunk(
-                    document_id=document.id,
-                    chunk_text=content,  # 存储原文以便可能的调试或预览
-                    chunk_order=0,  # 顺序为0，因为只有一个块
-                    **({embedding_col: embedding} if embedding_col else {}),
+                # 3. 切块：original_content 为 Markdown/纯文本（文件解析在
+                #    上传时已完成）。短文档产出一个单块（无父子，与旧行为
+                #    一致），长文档产出父子结构。
+                result = chunk_markdown(
+                    content,
+                    source_name=document.title or f"document_{document_id}",
                 )
-                session.add(new_chunk)
+                # 文档原始内容可能本就是 Markdown（Discord 提交/上传的 md），
+                # 以 .md 路径直接进入标题切分管线
+                total_children = 0
+                total_parents = 0
+                order = 0
+
+                for block in result.blocks:
+                    parent_id = None
+                    if block.parent_text:
+                        # 父块：存节全文，不建向量（检索后回取用）
+                        parent = KnowledgeChunk(
+                            document_id=document.id,
+                            chunk_text=block.parent_text,
+                            chunk_order=order,
+                            section_path=block.path or None,
+                        )
+                        session.add(parent)
+                        await session.flush()
+                        parent_id = parent.id
+                        order += 1
+                        total_parents += 1
+
+                    for child_text in block.children:
+                        embedding = None
+                        if embedding_service:
+                            # 子块向量携带面包屑前缀，注入章节语境
+                            embed_text = (
+                                f"{block.path}\n{child_text}"
+                                if block.path
+                                else child_text
+                            )
+                            embedding = await embedding_service.generate_embedding(
+                                text=embed_text, task_type="retrieval_document"
+                            )
+                            if not embedding:
+                                log.warning(
+                                    f"文档 {document_id} 的一个子块生成嵌入失败，"
+                                    f"仅保留文本（BM25 仍可检索）。"
+                                )
+                        session.add(
+                            KnowledgeChunk(
+                                document_id=document.id,
+                                chunk_text=child_text,
+                                chunk_order=order,
+                                parent_id=parent_id,
+                                section_path=block.path or None,
+                                **(
+                                    {embedding_col: embedding}
+                                    if embedding_col and embedding
+                                    else {}
+                                ),
+                            )
+                        )
+                        order += 1
+                        total_children += 1
+
                 await session.commit()
-                log.info(f"文档 ID {document_id} 已作为单个单元成功处理并存储。")
+                log.info(
+                    f"文档 ID {document_id} 处理完成："
+                    f"{total_parents} 个父块 + {total_children} 个可检索块。"
+                )
+                return {
+                    "chunk_count": total_children,
+                    "parent_count": total_parents,
+                }
 
         except Exception as e:
             log.error(
-                f"处理教程文档 {document_id} 的简化 RAG 流程时发生严重错误: {e}",
+                f"处理教程文档 {document_id} 的 RAG 流程时发生严重错误: {e}",
                 exc_info=True,
             )
+            return None
 
     # search 功能将由现有的 tutorial_search_service 统一处理，
     # 以保持查询入口的一致性。该服务仅负责数据的索引。

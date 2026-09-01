@@ -2,11 +2,9 @@
 import logging
 import logging.handlers
 from typing import Any, List, Dict
-from sqlalchemy import select, text
+from sqlalchemy import text
 
-# 导入父文档和子文档的模型
 from src.database.database import AsyncSessionLocal
-from src.database.models import KnowledgeChunk, TutorialDocument
 
 import os
 
@@ -66,6 +64,8 @@ class TutorialSearchService:
         # 根据配置选择使用哪个 embedding 列
         embedding_col = await get_embedding_column()
         # We need to join with tutorial_documents to get the thread_id
+        # parent_id IS NULL：只检索子块/单块；父块（节级全文）不参与召回，
+        # 避免与子块重复命中同一内容稀释 RRF 排名
         sql_query = text(
             f"""
             WITH semantic_search AS (
@@ -75,6 +75,7 @@ class TutorialSearchService:
                     td.thread_id
                 FROM tutorials.knowledge_chunks kc
                 JOIN tutorials.tutorial_documents td ON kc.document_id = td.id
+                WHERE kc.parent_id IS NULL AND kc.{embedding_col} IS NOT NULL
                 ORDER BY kc.{embedding_col} <=> :query_vector
                 LIMIT :top_k_vector
             ),
@@ -85,7 +86,7 @@ class TutorialSearchService:
                     td.thread_id
                 FROM tutorials.knowledge_chunks kc
                 JOIN tutorials.tutorial_documents td ON kc.document_id = td.id
-                WHERE kc.chunk_text @@@ :query_text
+                WHERE kc.chunk_text @@@ :query_text AND kc.parent_id IS NULL
                 LIMIT :top_k_fts
             )
             SELECT
@@ -140,81 +141,80 @@ class TutorialSearchService:
         self, session, ids: List[int]
     ) -> List[Dict[str, str]]:
         """
-        根据 chunk ID 列表，获取其所属的、唯一的父文档的完整内容。
-        这个实现确保了在去重和截断时，保持原始传入 `ids` 列表的顺序。
+        根据命中的 chunk ID 列表，回取节级上下文（small-to-big）：
+        - 命中子块（parent_id 非空）→ 返回父块的节级全文
+        - 命中单块（parent_id 为空）→ 返回其自身内容
+
+        同一父块的多个子块命中时合并为一个上下文条目；
+        去重与截断均保持原始传入 `ids` 的优先级顺序。
         """
         if not ids:
             return []
 
-        log.info(f"父文档获取：收到排序后的 chunk IDs: {ids}")
+        log.info(f"父块回取：收到排序后的 chunk IDs: {ids}")
 
-        # 1. 根据 chunk IDs 查询它们所属的父文档 ID。
-        # 这里不直接在SQL中使用DISTINCT，因为那可能会丢失我们想要的顺序。
-        doc_ids_stmt = select(KnowledgeChunk.document_id).where(
-            KnowledgeChunk.id.in_(ids)
+        # 一条 SQL 完成：子块 → 父块 LEFT JOIN，标题来自所属文档；
+        # COALESCE 保证单块（无父块）回退到自身内容
+        stmt = text(
+            """
+            SELECT
+                kc.id AS chunk_id,
+                COALESCE(kc.parent_id, kc.id) AS context_id,
+                COALESCE(parent.chunk_text, kc.chunk_text) AS content,
+                COALESCE(parent.section_path, kc.section_path) AS section_path,
+                td.title AS title,
+                td.thread_id AS thread_id
+            FROM tutorials.knowledge_chunks kc
+            LEFT JOIN tutorials.knowledge_chunks parent
+                ON kc.parent_id = parent.id
+            JOIN tutorials.tutorial_documents td ON kc.document_id = td.id
+            """
         )
-
-        # 2. 使用CASE语句在SQL层面强制排序，确保返回的doc_id顺序与chunk_id的优先级一致
-        order_case = text(
-            "CASE "
+        # ids 来自数据库自增主键（int），f-string 拼接无注入风险；
+        # WHERE 限定命中块，CASE 保持命中优先级顺序
+        ids_str = ", ".join(str(int(i)) for i in ids)
+        stmt = text(
+            stmt.text
+            + f"WHERE kc.id IN ({ids_str}) "
+            + "ORDER BY CASE "
             + " ".join(
-                [
-                    f"WHEN tutorials.knowledge_chunks.id = {id_} THEN {i}"
-                    for i, id_ in enumerate(ids)
-                ]
+                [f"WHEN kc.id = {id_} THEN {i}" for i, id_ in enumerate(ids)]
             )
             + " END"
         )
-        doc_ids_stmt = doc_ids_stmt.order_by(order_case)
 
-        doc_ids_result = await session.execute(doc_ids_stmt)
-        # 获取所有相关的 doc_id，保持数据库返回的顺序
-        ordered_doc_ids = [row[0] for row in doc_ids_result.fetchall()]
-        log.info(
-            f"父文档获取：从数据库按 chunk 优先级获取的 doc IDs: {ordered_doc_ids}"
-        )
-
-        # 3. 在 Python 中进行有序去重
-        unique_doc_ids = list(dict.fromkeys(ordered_doc_ids))
-        log.info(f"父文档获取：有序去重后的唯一 doc IDs: {unique_doc_ids}")
-
-        if not unique_doc_ids:
+        rows = (await session.execute(stmt)).fetchall()
+        if not rows:
             return []
 
-        # 4. 截断，只保留最高优先级的父文档
-        max_parent_docs = self.config["MAX_PARENT_DOCS"]
-        if len(unique_doc_ids) > max_parent_docs:
-            truncated_ids = unique_doc_ids[:max_parent_docs]
+        # Python 有序去重：同一上下文（父块/单块）只保留一条
+        seen_context_ids = set()
+        contexts: List[Dict[str, str]] = []
+        for row in rows:
+            context_id = row.context_id
+            if context_id in seen_context_ids:
+                continue
+            seen_context_ids.add(context_id)
+            content = row.content
+            if row.section_path:
+                # 喂给 LLM 时拼接面包屑，注入章节位置语境
+                content = f"【{row.section_path}】\n{content}"
+            contexts.append({"title": row.title, "content": content})
+
+        # 截断，只保留最高优先级的上下文条目
+        max_contexts = self.config["MAX_PARENT_DOCS"]
+        if len(contexts) > max_contexts:
             log.info(
-                f"检索到的唯一父文档数量 ({len(unique_doc_ids)}) 超过上限 {max_parent_docs}，"
-                f"将截断为: {truncated_ids}"
+                f"去重后的上下文条目数 ({len(contexts)}) 超过上限 {max_contexts}，"
+                f"将截断为前 {max_contexts} 条。"
             )
-            unique_doc_ids = truncated_ids
+            contexts = contexts[:max_contexts]
 
-        # 5. 根据最终确定的、唯一的、排序后的、截断后的父文档 ID 列表，查询并返回完整的父文档内容和标题
-        parent_docs_stmt = select(
-            TutorialDocument.title, TutorialDocument.original_content
-        ).where(TutorialDocument.id.in_(unique_doc_ids))
-
-        # 同样，在这里也强制排序，以确保最终输出的上下文顺序与优先级一致
-        final_order_case = text(
-            "CASE "
-            + " ".join(
-                [
-                    f"WHEN tutorials.tutorial_documents.id = {id_} THEN {i}"
-                    for i, id_ in enumerate(unique_doc_ids)
-                ]
-            )
-            + " END"
+        log.info(
+            f"父块回取：{len(ids)} 个命中块 → {len(contexts)} 条上下文"
+            f"（{[c['title'] for c in contexts]}）"
         )
-        parent_docs_stmt = parent_docs_stmt.order_by(final_order_case)
-
-        parent_docs_result = await session.execute(parent_docs_stmt)
-
-        return [
-            {"title": row.title, "content": row.original_content}
-            for row in parent_docs_result.all()
-        ]
+        return contexts
 
     async def search(
         self, query: str, user_id: str = "N/A", thread_id: int | None = None

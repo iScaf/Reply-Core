@@ -24,6 +24,12 @@ fastapi
 uvicorn[standard]
 
 httpx
+python-multipart  # FastAPI 文件上传（multipart/form-data）必需
+
+# 上传文档解析与切块（md/pdf/docx/xlsx → 统一 Markdown）
+pymupdf4llm
+python-docx
+openpyxl
 
 # 测试依赖
 pytest

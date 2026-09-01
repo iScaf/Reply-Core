@@ -114,6 +114,17 @@ class KnowledgeChunk(Base):
 
     chunk_text = Column(Text, nullable=False, comment="这个特定文本块的内容。")
     chunk_order = Column(Integer, nullable=False, comment="文本块在文档中的序列号。")
+    parent_id = Column(
+        Integer,
+        ForeignKey(f"{TUTORIALS_SCHEMA}.knowledge_chunks.id"),
+        nullable=True,
+        comment="父块ID（节级父块）；NULL=父块或独立单块。父块不建向量，仅用于检索后回取节级上下文（small-to-big）。",
+    )
+    section_path = Column(
+        Text,
+        nullable=True,
+        comment="面包屑章节路径，如 '第二章 部署 > 2.1 环境准备'（源自上传文档的 Markdown 标题层级）",
+    )
 
     bge_embedding = Column(
         HALFVEC(EMBEDDING_DIMENSION),
