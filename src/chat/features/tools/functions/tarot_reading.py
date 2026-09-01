@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 塔罗占卜工具 - 为用户执行塔罗牌占卜
+
+双端适配：
+- Discord 端：生成牌阵图片发送到频道
+- Web 端（无 channel）：返回牌阵图片的 base64 编码，由前端渲染
 """
 
+import base64
 import io
 import logging
 from typing import Dict, Any, Literal
@@ -43,7 +48,7 @@ async def tarot_reading(
 ) -> Dict[str, Any]:
     """
     为用户执行塔罗牌占卜。当用户请求占卜、算命或想看运势时调用。
-    工具会生成并发送牌阵图片，返回牌面信息供解读。
+    Discord 端会发送牌阵图片；Web 端返回牌面信息与 base64 图片供渲染。
     """
     # 从 Pydantic 模型中提取参数
     question = params.question
@@ -54,14 +59,11 @@ async def tarot_reading(
     )
 
     channel = kwargs.get("channel")
-    if not channel:
-        log.error("无法执行塔罗牌占卜：缺少 'channel' 对象。")
-        return {
-            "error": "Cannot perform tarot reading without a valid channel to send the image to."
-        }
 
+    # 受限服务器检查仅在 Discord 上下文中执行
     if (
-        TarotConfig.RESTRICTED_GUILD_ID
+        channel
+        and TarotConfig.RESTRICTED_GUILD_ID
         and channel.guild
         and channel.guild.id == TarotConfig.RESTRICTED_GUILD_ID
     ):
@@ -77,38 +79,48 @@ async def tarot_reading(
         await chat_db_manager.increment_tarot_reading_count()
         image_data, cards = await tarot_service.perform_reading(question, spread_type)
 
-        if image_data and cards:
-            log.info(f"成功生成塔罗牌图片，准备发送到频道 {channel.id}。")
+        if not (image_data and cards):
+            log.error("塔罗牌占卜失败：未能生成图片或抽到牌。")
+            if channel:
+                await channel.send("抱歉，塔罗牌占卜出了一点小问题，无法生成牌阵图片。")
+            return {"error": "Failed to generate tarot image or draw cards."}
 
+        card_details = []
+        for card in cards:
+            card_details.append(
+                {
+                    "name": card["name"],
+                    "orientation": card["orientation"],
+                    "meaning_up": card["meaning_up"],
+                    "meaning_rev": card["meaning_rev"],
+                }
+            )
+
+        # Discord 端：发送牌阵图片到频道
+        if channel:
+            log.info(f"成功生成塔罗牌图片，准备发送到频道 {channel.id}。")
             image_file = discord.File(
                 io.BytesIO(image_data), filename="tarot_reading.png"
             )
             await channel.send(file=image_file)
-
             log.info("塔罗牌图片发送成功。")
-
-            card_details = []
-            for card in cards:
-                card_details.append(
-                    {
-                        "name": card["name"],
-                        "orientation": card["orientation"],
-                        "meaning_up": card["meaning_up"],
-                        "meaning_rev": card["meaning_rev"],
-                    }
-                )
-
             return {
                 "status": "image_sent_successfully",
                 "question": question,
                 "cards": card_details,
             }
-        else:
-            log.error("塔罗牌占卜失败：未能生成图片或抽到牌。")
-            await channel.send("抱歉，塔罗牌占卜出了一点小问题，无法生成牌阵图片。")
-            return {"error": "Failed to generate tarot image or draw cards."}
+
+        # Web 端：返回 base64 图片供前端渲染
+        log.info("Web 端塔罗占卜完成，返回 base64 牌阵图片。")
+        return {
+            "status": "image_generated",
+            "question": question,
+            "cards": card_details,
+            "image_base64": base64.b64encode(image_data).decode(),
+        }
 
     except Exception as e:
         log.error("执行塔罗牌占卜时发生未知错误。", exc_info=True)
-        await channel.send("抱歉，塔罗牌占卜时遇到了一个意想不到的错误。")
+        if channel:
+            await channel.send("抱歉，塔罗牌占卜时遇到了一个意想不到的错误。")
         return {"error": f"An unexpected error occurred: {str(e)}"}
