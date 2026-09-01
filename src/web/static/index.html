@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>秒回喵 // 检索观测台</title>
-<link rel="stylesheet" href="/static/css/base.css?v=20260901b">
-<link rel="stylesheet" href="/static/css/theme-warm.css?v=20260901b">
-<link rel="stylesheet" href="/static/css/console.css?v=20260901b">
+<link rel="stylesheet" href="/static/css/base.css?v=20260901i">
+<link rel="stylesheet" href="/static/css/theme-warm.css?v=20260901i">
+<link rel="stylesheet" href="/static/css/console.css?v=20260901i">
 <script>
   /* 防闪烁：在样式渲染前先恢复上次选择的主题 */
   try { if (localStorage.getItem('rc-theme') === 'warm') document.documentElement.dataset.theme = 'warm'; } catch (e) {}
@@ -42,6 +42,13 @@
   </header>
 
   <nav>
+    <div class="nav-top">
+      <div class="icon-btn" id="navToggle" title="折叠/展开菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="14" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/>
+        </svg>
+      </div>
+    </div>
     <div class="nav-group">
       <div class="nav-label">观测</div>
       <div class="nav-item active" data-view="search"><span class="k">01</span> 检索测试台</div>
@@ -54,6 +61,7 @@
     <div class="nav-group">
       <div class="nav-label">运行</div>
       <div class="nav-item" data-view="review"><span class="k">04</span> 审核队列 <span class="nav-badge" id="navPending">0</span></div>
+      <div class="nav-item" data-view="users"><span class="k">05</span> 用户信息</div>
     </div>
   </nav>
 
@@ -73,6 +81,7 @@
               <option value="all">全库</option>
               <option value="tutorials">教程库</option>
               <option value="community_settings">社区设定</option>
+              <option value="user_chat">用户聊天</option>
             </select>
             <button class="btn-run" id="searchBtn">执行检索</button>
           </div>
@@ -146,7 +155,48 @@
         <div class="review-grid" id="reviewGrid"></div>
       </section>
     </div>
+
+    <!-- 视图：用户信息 -->
+    <div class="view hidden" id="view-users">
+      <section class="sec">
+        <div class="sec-head">
+          <div class="sec-title">用户信息 · community.member_profiles</div>
+          <div class="sec-sub" id="sub-users">—</div>
+        </div>
+        <div class="doc-toolbar">
+          <input id="q-users" placeholder="按 Discord ID / 昵称 / 档案 / 记忆搜索…（回车执行）">
+          <button class="btn" id="reload-users">刷新</button>
+        </div>
+        <table>
+          <thead><tr><th>Discord ID</th><th>昵称</th><th>个人记忆摘要</th><th>消息数</th></tr></thead>
+          <tbody id="tbody-users"></tbody>
+        </table>
+        <div class="pager" id="pager-users"></div>
+      </section>
+    </div>
   </main>
+
+  <!-- 用户详情弹层 -->
+  <div class="modal-overlay hidden" id="userModal">
+    <div class="modal">
+      <h3 id="umTitle">—</h3>
+      <div class="meta" id="umMeta"></div>
+      <div class="user-modal-scroll">
+        <h4>个人记忆摘要</h4>
+        <div class="fulltext" id="umSummary"></div>
+        <h4>记忆笔记</h4>
+        <div id="umNotes"></div>
+        <h4>对话记录搜索</h4>
+        <div class="doc-toolbar">
+          <input id="umChatQuery" placeholder="在该用户的对话记录中搜索…（回车执行）">
+        </div>
+        <div id="umChats"></div>
+        <h4>最近对话块</h4>
+        <div id="umBlocks"></div>
+      </div>
+      <div class="close-row"><button class="btn" id="umClose">关闭</button></div>
+    </div>
+  </div>
 
   <!-- 问答演示抽屉 -->
   <aside>
@@ -158,6 +208,7 @@
         <option value="all">全库</option>
         <option value="tutorials">仅教程</option>
         <option value="community_settings">仅设定</option>
+        <option value="user_chat">用户聊天</option>
       </select>
     </div>
     <div class="chat-input">
@@ -165,6 +216,20 @@
       <button id="chatSend">发送</button>
     </div>
   </aside>
+</div>
+
+<!-- 棱彩星：问答抽屉的悬浮开关（可拖动，限屏幕内） -->
+<div class="gem-fab" id="gemToggle" title="拖动移动 · 点击显示/隐藏问答演示">
+  <svg viewBox="0 0 100 100">
+    <defs>
+      <linearGradient id="gemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#439DDF"/><stop offset="30%" stop-color="#4F87ED"/>
+        <stop offset="55%" stop-color="#9476C5"/><stop offset="78%" stop-color="#BC688E"/>
+        <stop offset="100%" stop-color="#D6645D"/>
+      </linearGradient>
+    </defs>
+    <path fill="url(#gemGrad)" d="M50 0 C55 28 72 45 100 50 C72 55 55 72 50 100 C45 72 28 55 0 50 C28 45 45 28 50 0 Z"/>
+  </svg>
 </div>
 
 <!-- 文档详情弹层 -->
@@ -198,10 +263,12 @@
 </div>
 
 <!-- 静态资源版本号（cache-busting）：改动前端 JS/CSS 后请同步升级 v 参数，强制浏览器拉取新文件 -->
+<script src="/static/js/vendor/gsap.min.js"></script>
+<script src="/static/js/vendor/Draggable.min.js"></script>
 <script src="/static/js/vendor/marked.min.js"></script>
 <script src="/static/js/vendor/purify.min.js"></script>
-<script src="/static/js/theme.js?v=20260901c"></script>
-<script src="/static/js/api.js?v=20260901c"></script>
-<script src="/static/js/app.js?v=20260901c"></script>
+<script src="/static/js/theme.js?v=20260901i"></script>
+<script src="/static/js/api.js?v=20260901i"></script>
+<script src="/static/js/app.js?v=20260901i"></script>
 </body>
 </html>

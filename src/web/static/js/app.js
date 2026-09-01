@@ -28,6 +28,7 @@
     'docs-tutorials': function () { docViews.tutorials.refresh(); },
     'docs-settings': function () { docViews.settings.refresh(); },
     'review': loadReview,
+    'users': function () { usersView.refresh(); },
   };
   function showView(name) {
     document.querySelectorAll('.nav-item').forEach(function (n) {
@@ -37,6 +38,16 @@
       v.classList.toggle('hidden', v.id !== 'view-' + name);
     });
     if (loaders[name]) loaders[name]();
+    // 动画 A：进入视图的区块波浪入场（GSAP）
+    if (window.gsap) {
+      const secs = document.querySelectorAll('#view-' + name + ' .sec');
+      secs.forEach(function (sec) {
+        gsap.fromTo(sec, { y: 22, opacity: 0 },
+          { y: 0, opacity: 1, duration: .45, ease: 'power2.out' });
+      });
+      const rows = document.querySelectorAll('#view-' + name + ' tbody tr');
+      gsap.fromTo(rows, { opacity: 0 }, { opacity: 1, duration: .3, stagger: .03, delay: .1 });
+    }
   }
   document.querySelectorAll('.nav-item').forEach(function (n) {
     n.addEventListener('click', function () { showView(n.dataset.view); });
@@ -47,8 +58,13 @@
       const stats = await api('/api/stats');
       document.body.classList.add('authed');
       renderStats(stats);
-      if (!entered) { entered = true; showView('search'); }
-      else { showView(document.querySelector('.nav-item.active').dataset.view); }
+      if (!entered) {
+        entered = true;
+        showView('search');
+        loadOlderHistory(true);  // 进入控制台时加载最近 5 轮历史
+      } else {
+        showView(document.querySelector('.nav-item.active').dataset.view);
+      }
     } catch (e) { /* 401 已由 api() 处理 */ }
   }
 
@@ -74,6 +90,17 @@
       + vital(s.forum_threads, '论坛帖索引')
       + vital(s.tutorials.chunks + s.community.chunks, '向量块 chunks')
       + vital(pending, '待审条目');
+    // 动画 B：统计数字从 0 滚动到真实值
+    if (window.gsap) {
+      document.querySelectorAll('#vitals .v').forEach(function (el) {
+        const end = Number(el.textContent) || 0;
+        const o = { n: 0 };
+        gsap.to(o, { n: end, duration: .9, ease: 'power2.out',
+          onUpdate: function () { el.textContent = Math.round(o.n); } });
+        gsap.fromTo(el, { scale: .5, transformOrigin: 'left center' },
+          { scale: 1, duration: .45, ease: 'back.out(2.4)' });
+      });
+    }
   }
   function vital(v, label) {
     return '<div class="vital"><div class="v">' + v + '</div><div class="l">' + label + '</div></div>';
@@ -240,6 +267,103 @@
     settings: createDocView('community_settings', 'settings'),
   };
 
+  /* ================= 用户信息视图 ================= */
+  const usersViewState = { page: 1, pageSize: 20, q: '' };
+
+  async function refreshUsers(page) {
+    const state = usersViewState;
+    if (page) state.page = page;
+    const tbody = $('tbody-users'), pager = $('pager-users'), sub = $('sub-users');
+    tbody.innerHTML = '<tr><td colspan="4" class="table-empty">加载中…</td></tr>';
+    try {
+      const data = await api('/api/users?page=' + state.page
+        + '&page_size=' + state.pageSize
+        + (state.q ? '&q=' + encodeURIComponent(state.q) : ''));
+      sub.textContent = '共 ' + data.total + ' 位用户 · 第 ' + data.page + ' / '
+        + Math.max(1, Math.ceil(data.total / state.pageSize)) + ' 页';
+      if (!data.items.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="table-empty">没有匹配的用户</td></tr>';
+        pager.innerHTML = '';
+        return;
+      }
+      tbody.innerHTML = data.items.map(function (u) {
+        return '<tr class="row-click" data-id="' + u.id + '">'
+          + '<td class="doc-id">' + esc(u.discord_id || '（未绑定）') + '</td>'
+          + '<td>' + esc(u.title || '（无昵称）') + '</td>'
+          + '<td>' + esc((u.personal_summary || '—').slice(0, 60)) + '</td>'
+          + '<td>' + (u.personal_message_count || 0) + '</td></tr>';
+      }).join('');
+      tbody.querySelectorAll('tr').forEach(function (tr) {
+        tr.addEventListener('click', function () { openUser(Number(tr.dataset.id)); });
+      });
+      const totalPages = Math.max(1, Math.ceil(data.total / state.pageSize));
+      pager.innerHTML = ''
+        + '<button id="users-prev"' + (state.page <= 1 ? ' disabled' : '') + '>上一页</button>'
+        + '<span>第 ' + state.page + ' / ' + totalPages + ' 页</span>'
+        + '<button id="users-next"' + (state.page >= totalPages ? ' disabled' : '') + '>下一页</button>';
+      $('users-prev').addEventListener('click', function () { refreshUsers(state.page - 1); });
+      $('users-next').addEventListener('click', function () { refreshUsers(state.page + 1); });
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="4" class="table-empty">加载失败: ' + esc(e.message) + '</td></tr>';
+    }
+  }
+
+  const usersView = { refresh: function () { refreshUsers(usersViewState.page || 1); } };
+  $('q-users').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { usersViewState.q = $('q-users').value.trim(); refreshUsers(1); }
+  });
+  $('reload-users').addEventListener('click', function () {
+    usersViewState.q = $('q-users').value.trim(); refreshUsers(1);
+  });
+
+  /* ---------- 用户详情弹层 ---------- */
+  let currentUser = null;
+  async function openUser(id) {
+    currentUser = id;
+    try {
+      const u = await api('/api/users/' + id);
+      $('umTitle').textContent = '用户 ' + (u.title || u.discord_id || u.id);
+      $('umMeta').innerHTML = ''
+        + (u.discord_id ? '<span>Discord ID ' + esc(u.discord_id) + '</span>' : '')
+        + '<span>消息 ' + (u.personal_message_count || 0) + ' 条</span>'
+        + '<span>' + (u.memory_notes.length) + ' 条记忆笔记</span>';
+      $('umSummary').textContent = u.personal_summary || u.full_text || '（暂无档案）';
+      $('umNotes').innerHTML = u.memory_notes.map(function (n) {
+        return '<div class="chunk"><span class="idx">' + esc(n.category) + '</span>' + esc(n.content) + '</div>';
+      }).join('') || '<div class="table-empty">暂无记忆笔记</div>';
+      renderUserBlocks(u.recent_blocks || []);
+      $('userModal').classList.remove('hidden');
+    } catch (e) {
+      alert('加载用户详情失败: ' + e.message);
+    }
+  }
+  function renderUserBlocks(blocks) {
+    $('umBlocks').innerHTML = blocks.map(function (b) {
+      return '<div class="chunk"><span class="idx">#' + b.id + ' · '
+        + (b.message_count || 0) + ' 条 · ' + (b.start_time ? b.start_time.slice(0, 10) : '')
+        + '</span>' + esc(b.conversation_text) + '</div>';
+    }).join('') || '<div class="table-empty">暂无对话记录</div>';
+  }
+  $('umChatQuery').addEventListener('keydown', async function (e) {
+    if (e.key !== 'Enter' || !currentUser) return;
+    const q = this.value.trim();
+    if (!q) return;
+    try {
+      const data = await api('/api/users/' + currentUser + '/chats?q=' + encodeURIComponent(q));
+      $('umChats').innerHTML = data.items.map(function (b) {
+        return '<div class="chunk"><span class="idx">#' + b.id + ' · '
+          + (b.start_time ? b.start_time.slice(0, 10) : '') + '</span>'
+          + esc(b.conversation_text) + '</div>';
+      }).join('') || '<div class="table-empty">没有匹配的对话记录</div>';
+    } catch (e) {
+      $('umChats').innerHTML = '<div class="table-empty">搜索失败: ' + esc(e.message) + '</div>';
+    }
+  });
+  $('umClose').addEventListener('click', function () { $('userModal').classList.add('hidden'); });
+  $('userModal').addEventListener('click', function (e) {
+    if (e.target === this) this.classList.add('hidden');
+  });
+
   /* ================= 文档详情弹层 ================= */
   const docModalState = { source: null, id: null };
 
@@ -386,39 +510,372 @@
 
   /* ================= 问答演示 ================= */
   const chatHistory = [];
+  let historyPage = 0;          // 已加载的历史页码（0 = 尚未加载）
+  let historyHasMore = false;
+  let loadingHistory = false;
+
+  // 渲染一条历史消息（静态，无流式效果）
+  function renderHistoryMsg(role, text, opts) {
+    opts = opts || {};
+    let html;
+    if (opts.usage) {
+      html = mdRender(text, opts.citations || [])
+        + '<div class="usage-line">⏱ ' + (opts.elapsed_ms != null ? opts.elapsed_ms + 'ms · ' : '')
+        + '📈 ' + (opts.usage.prompt_tokens || 0) + ' in / '
+        + (opts.usage.completion_tokens || 0) + ' out tokens</div>';
+    } else {
+      html = esc(text);
+    }
+    (opts.toolTrace || []).forEach(function (t) {
+      html += '<div class="tool-line">'
+        + '<div class="tool-head"><span class="tool-icon">⚙</span> <b>'
+        + esc(t.name) + '</b><span class="tool-head-status done">'
+        + (t.elapsed_ms != null ? t.elapsed_ms + 'ms' : '') + '</span></div>'
+        + '</div>';
+    });
+    pushMsg(role, html, { markdown: role === 'bot' });
+  }
+
+  // 加载一页历史（page 递增，向上追加更早的消息）
+  async function loadOlderHistory(initial) {
+    if (loadingHistory || (historyHasMore === false && !initial)) return;
+    loadingHistory = true;
+    try {
+      const data = await api('/api/chat/history?page=' + (historyPage + 1) + '&rounds=5');
+      historyPage = data.page;
+      historyHasMore = data.has_more;
+      const box = $('chatMsgs');
+      const older = document.createDocumentFragment();
+      data.messages.forEach(function (m) {
+        const role = m.role === 'user' ? 'user' : 'bot';
+        const usage = role === 'bot' && (m.prompt_tokens || m.completion_tokens)
+          ? { prompt_tokens: m.prompt_tokens, completion_tokens: m.completion_tokens } : null;
+        let html;
+        if (role === 'bot') {
+          html = mdRender(m.content || '', []);
+          (m.tool_trace || []).forEach(function (t) {
+            html += '<div class="tool-line"><div class="tool-head"><span class="tool-icon">⚙</span> <b>'
+              + esc(t.name) + '</b><span class="tool-head-status done">'
+              + (t.elapsed_ms != null ? t.elapsed_ms + 'ms' : '') + '</span></div></div>';
+          });
+          if (usage) {
+            html += '<div class="usage-line">⏱ ' + (m.elapsed_ms != null ? m.elapsed_ms + 'ms · ' : '')
+              + '📈 ' + (usage.prompt_tokens || 0) + ' in / '
+              + (usage.completion_tokens || 0) + ' out tokens</div>';
+          }
+        } else {
+          html = esc(m.content || '');
+        }
+        const div = document.createElement('div');
+        div.className = 'msg ' + role;
+        div.innerHTML = '<div class="who"' + (role === 'user' ? ' style="text-align:right"' : '') + '>'
+          + (role === 'user' ? '管理员' : '秒回喵 · Reply-Core') + '</div>'
+          + '<div class="bubble' + (role === 'bot' ? ' md' : '') + '">' + html + '</div>';
+        older.appendChild(div);
+      });
+      if (initial) {
+        box.insertBefore(older, box.firstChild);
+        box.scrollTop = box.scrollHeight;
+      } else if (data.messages.length) {
+        const prevHeight = box.scrollHeight;
+        box.insertBefore(older, box.firstChild);
+        box.scrollTop = box.scrollHeight - prevHeight; // 保持视口位置
+      }
+      // 顶部"加载更早"按钮
+      let more = document.getElementById('loadOlderBtn');
+      if (historyHasMore) {
+        if (!more) {
+          more = document.createElement('button');
+          more.id = 'loadOlderBtn';
+          more.className = 'load-older';
+          more.textContent = '↑ 加载更早的对话';
+          more.addEventListener('click', function () { loadOlderHistory(false); });
+          box.insertBefore(more, box.firstChild);
+        }
+      } else if (more) {
+        more.remove();
+      }
+    } catch (e) {
+      /* 历史加载失败不打断使用 */
+    } finally {
+      loadingHistory = false;
+    }
+  }
+
   $('chatSend').addEventListener('click', sendChat);
   $('chatInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChat(); });
+  /* ================= DeepSeek 风格流式渲染 ================= */
+  // 思维链折叠区块：流式展开滚动；正文/下一轮开始时折叠为"已深度思考（用时）"
+  function createThinkBlock(bubble) {
+    const block = document.createElement('div');
+    block.className = 'think-block thinking';
+    block.innerHTML = '<div class="think-head"><span class="think-icon">🤔</span>'
+      + '<span class="think-title">正在深度思考…</span><span class="think-arrow">▾</span></div>'
+      + '<div class="think-body"></div>';
+    bubble.appendChild(block);
+    const head = block.querySelector('.think-head');
+    head.addEventListener('click', function () {
+      block.classList.toggle('collapsed');
+    });
+    const box = document.getElementById('chatMsgs');
+    return {
+      block: block,
+      body: block.querySelector('.think-body'),
+      title: block.querySelector('.think-title'),
+      text: '',
+      startedAt: Date.now(),
+      append: function (delta) {
+        this.text += delta;
+        this.body.textContent = this.text;
+        box.scrollTop = box.scrollHeight; // 思考中保持滚动到底
+      },
+      collapse: function () {
+        if (block.classList.contains('collapsed')) return;
+        const secs = ((Date.now() - this.startedAt) / 1000).toFixed(1);
+        this.title.textContent = '已深度思考（用时 ' + secs + ' 秒）';
+        block.classList.remove('thinking');
+        block.classList.add('collapsed');
+      },
+    };
+  }
+
+  // 工具调用行：默认缩回（仅名称+耗时），点击展开查看描述/参数/结果摘要
+  function appendToolLine(bubble, data) {
+    const line = document.createElement('div');
+    line.className = 'tool-line running collapsed';
+    const displayName = data.display || data.name;
+    const desc = data.description ? ' — ' + esc(data.description) : '';
+    const argsJson = JSON.stringify(data.arguments || {});
+    line.innerHTML = '<div class="tool-head">'
+      + '<span class="tool-icon">⚙</span> <b>' + esc(displayName) + '</b>'
+      + '<span class="tool-head-status">执行中…</span>'
+      + '<span class="think-arrow">▾</span></div>'
+      + '<div class="tool-detail">'
+      + '<div class="tool-desc">' + desc + '</div>'
+      + '<div class="tool-args">' + esc(argsJson) + '</div>'
+      + '<div class="tool-status">执行中…</div>'
+      + '</div>';
+    line.addEventListener('click', function () {
+      if (line.classList.contains('running')) return; // 执行中不可折叠
+      line.classList.toggle('collapsed');
+    });
+    bubble.appendChild(line);
+    line.__done = function (doneData) {
+      line.classList.remove('running');
+      const status = line.querySelector('.tool-status');
+      const summary = doneData.summary || '';
+      status.className = 'tool-status done';
+      status.innerHTML = '✓ ' + (doneData.elapsed_ms != null ? doneData.elapsed_ms + 'ms · ' : '')
+        + '<span class="tool-summary" title="' + esc(summary) + '">' + esc(summary.slice(0, 60))
+        + (summary.length > 60 ? '…' : '') + '</span>';
+      const headStatus = line.querySelector('.tool-head-status');
+      if (headStatus) {
+        headStatus.textContent = '✓ ' + (doneData.elapsed_ms != null ? doneData.elapsed_ms + 'ms' : '完成');
+        headStatus.className = 'tool-head-status done';
+      }
+    };
+    return line;
+  }
+
+  // 折叠当前气泡内所有处于展开状态的超时思考块（进入正文/新一轮时调用）
+  function collapseThinking(bubble) {
+    bubble.querySelectorAll('.think-block.thinking').forEach(function (b) {
+      const secs = ((Date.now() - Number(b.dataset.started || Date.now())) / 1000).toFixed(1);
+      const title = b.querySelector('.think-title');
+      if (title && title.textContent.indexOf('已深度思考') !== 0) {
+        title.textContent = '已深度思考（用时 ' + secs + ' 秒）';
+      }
+      b.classList.remove('thinking');
+      b.classList.add('collapsed');
+    });
+  }
+
   async function sendChat() {
     const text = $('chatInput').value.trim();
     if (!text) return;
     $('chatInput').value = '';
     pushMsg('user', esc(text));
     const send = $('chatSend'); send.disabled = true;
-    const waiting = pushMsg('bot', '<span style="color:var(--dim)">检索知识库并生成回复…</span>');
-    try {
-      const data = await api('/api/chat', {
-        method: 'POST',
-        body: { message: text, scope: $('chatScope').value, history: chatHistory.slice(-6) },
-      });
-      waiting.remove();
-      if (data.model) $('chatModelTag').textContent = 'model: ' + data.model;
 
-      let html = mdRender(data.reply || '', data.citations);
-      if (data.tool_trace && data.tool_trace.length) {
-        html += '<div class="tool-trace">'
-          + data.tool_trace.map(function (t) {
-              return '⚙ ' + esc(t.name) + '(' + esc(JSON.stringify(t.arguments)) + ') · ' + t.elapsed_ms + 'ms';
-            }).join('<br>')
-          + '</div>';
+    // 流式气泡骨架：状态行（预检索计时）/ 思维链区块 / 工具行 / 正文区
+    const shell = document.createElement('div');
+    shell.className = 'msg bot';
+    shell.innerHTML = '<div class="who">秒回喵 · Reply-Core</div><div class="bubble md streaming"></div>';
+    const bubble = shell.querySelector('.bubble');
+    let chatBox = $('chatMsgs');
+    chatBox.appendChild(shell);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    // 预检索等待态：动态状态行 + 已等待时间
+    const statusLine = document.createElement('div');
+    statusLine.className = 'search-status';
+    statusLine.innerHTML = '<span class="tool-icon">🔍</span> 正在检索知识库… <span class="search-timer">0.0s</span>';
+    bubble.appendChild(statusLine);
+    const searchStart = Date.now();
+    const searchTimer = setInterval(function () {
+      statusLine.querySelector('.search-timer').textContent =
+        ((Date.now() - searchStart) / 1000).toFixed(1) + 's';
+    }, 100);
+
+    let citations = [];
+    let toolTrace = [];
+    let currentThink = null;      // 当前轮思维链区块
+    let contentEl = null;         // 正文容器
+    let contentText = '';         // 正文累积
+    let renderTimer = null;       // 正文 markdown 重渲染节流
+    let finalData = null;
+
+    const flushRender = function () {
+      if (!contentEl) return;
+      contentEl.innerHTML = mdRender(contentText, citations);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    };
+
+    const handleEvent = function (event, data) {
+      if (event === 'citations') {
+        citations = data.citations || [];
+        statusLine.innerHTML = '<span class="tool-icon">🔍</span> 已检索到 '
+          + citations.length + ' 条相关资料';
+        setTimeout(function () { statusLine.remove(); }, 1200);
+        clearInterval(searchTimer);
+      } else if (event === 'round_start') {
+        if (currentThink) currentThink.collapse();
+        collapseThinking(bubble);
+        contentEl = null;         // 新一轮开始：重开正文区
+        // 轮次标签（首轮之后才显示分隔）
+        if (data.round > 1) {
+          const roundLine = document.createElement('div');
+          roundLine.className = 'round-line';
+          roundLine.textContent = '—— 工具调用 · 第 ' + data.round + ' 轮 ——';
+          bubble.appendChild(roundLine);
+        }
+        currentThink = createThinkBlock(bubble);
+        currentThink.block.dataset.started = String(currentThink.startedAt);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      } else if (event === 'reasoning') {
+        if (!currentThink) {
+          currentThink = createThinkBlock(bubble);
+          currentThink.block.dataset.started = String(currentThink.startedAt);
+        }
+        currentThink.append(data.delta);
+      } else if (event === 'tool_start') {
+        currentThink && currentThink.collapse();
+        collapseThinking(bubble);
+        appendToolLine(bubble, data);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      } else if (event === 'tool_end') {
+        toolTrace.push({
+          name: data.name, summary: data.summary, elapsed_ms: data.elapsed_ms,
+          arguments: {},
+        });
+        const lines = bubble.querySelectorAll('.tool-line.running');
+        if (lines.length) lines[lines.length - 1].__done(data);
+      } else if (event === 'image') {
+        // 工具产出的图片（如塔罗牌阵）：插入气泡渲染
+        const img = document.createElement('img');
+        img.className = 'tool-image';
+        img.src = data.data_url;
+        img.alt = data.name || '工具生成图片';
+        bubble.appendChild(img);
+        chatBox.scrollTop = chatBox.scrollHeight;
+      } else if (event === 'content') {
+        if (currentThink) currentThink.collapse();
+        collapseThinking(bubble);
+        if (!contentEl) {
+          contentEl = document.createElement('div');
+          contentEl.className = 'md-content';
+          bubble.appendChild(contentEl);
+        }
+        contentText += data.delta;
+        if (!renderTimer) {
+          renderTimer = setTimeout(function () {
+            renderTimer = null;
+            flushRender();
+          }, 80);
+        }
+      } else if (event === 'final') {
+        finalData = data;
+      } else if (event === 'degraded') {
+        finalData = data;
+      } else if (event === 'error') {
+        pushMsg('bot', '<span style="color:var(--warn)">请求失败: ' + esc(data.message) + '</span>');
       }
-      if (data.degraded) {
-        html += '<div class="degrade-note">⚠ 已降级为仅检索结果：' + esc(data.degrade_reason || '') + '</div>';
+    };
+
+    try {
+      // SSE 流式：POST + ReadableStream 手动解析（EventSource 不支持 POST）
+      const resp = await fetch('/api/chat/stream', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text, scope: $('chatScope').value, history: chatHistory.slice(-6),
+        }),
+      });
+      if (!resp.ok || !resp.body) {
+        throw new Error('流式接口不可用（' + resp.status + '）');
       }
-      pushMsg('bot', html, { markdown: true });
-      chatHistory.push({ role: 'user', content: text });
-      if (data.reply) chatHistory.push({ role: 'assistant', content: data.reply });
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let sep;
+        while ((sep = buffer.indexOf('\n\n')) >= 0) {
+          const rawEvent = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          let eventName = 'message', dataStr = '';
+          rawEvent.split('\n').forEach(function (line) {
+            if (line.startsWith('event:')) eventName = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+          });
+          if (!dataStr) continue;
+          try { handleEvent(eventName, JSON.parse(dataStr)); } catch (e) { /* 单事件容错 */ }
+        }
+      }
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+      clearInterval(searchTimer);
+
+      // 定稿：完整 markdown 重渲染 + 收尾信息
+      bubble.classList.remove('streaming');  // 移除流式光标
+      collapseThinking(bubble);
+      if (finalData && finalData.model) $('chatModelTag').textContent = 'model: ' + finalData.model;
+      if (finalData && finalData.degraded) {
+        const note = document.createElement('div');
+        note.className = 'degrade-note';
+        note.textContent = '⚠ 已降级为仅检索结果：' + (finalData.degrade_reason || '');
+        bubble.appendChild(note);
+        if (finalData.citations && finalData.citations.length) {
+          const dv = document.createElement('div');
+          dv.className = 'md-content';
+          dv.innerHTML = finalData.citations.map(function (c, i) {
+            return '<p>[资料' + (i + 1) + ']《' + esc(c.title) + '》</p>';
+          }).join('');
+          bubble.appendChild(dv);
+        }
+      } else if (contentEl) {
+        contentEl.innerHTML = mdRender(contentText, citations);  // 最终定稿渲染
+        if (finalData && (finalData.prompt_tokens || finalData.completion_tokens)) {
+          const usage = document.createElement('div');
+          usage.className = 'usage-line';
+          usage.textContent = '⏱ ' + (finalData.elapsed_ms != null ? finalData.elapsed_ms + 'ms' : '')
+            + ' · 📈 ' + (finalData.prompt_tokens || 0) + ' in / '
+            + (finalData.completion_tokens || 0) + ' out tokens';
+          bubble.appendChild(usage);
+        }
+      }
+      if (contentText) {
+        chatHistory.push({ role: 'user', content: text });
+        chatHistory.push({ role: 'assistant', content: contentText });
+      }
     } catch (e) {
-      waiting.remove();
+      if (renderTimer) clearTimeout(renderTimer);
+      clearInterval(searchTimer);
+      statusLine.remove();
+      shell.remove();
       pushMsg('bot', '<span style="color:var(--warn)">请求失败: ' + esc(e.message) + '</span>');
     } finally {
       send.disabled = false;
@@ -437,12 +894,15 @@
     return div;
   }
   /* Markdown 渲染：marked 解析 → DOMPurify 净化（防 XSS）→ 引用徽章替换。
-     库未加载时降级为纯文本（转义 + 换行）。 */
+     库未加载时降级为纯文本（转义 + 换行）。
+     注：数字间的波浪号（如 6~7、25~28，常见于气象/数值范围）先转义，
+     防止被 GFM 误解析为删除线。 */
   function mdRender(text, citations) {
     let html;
     if (window.marked && window.DOMPurify) {
       marked.setOptions({ breaks: true, gfm: true });
-      html = DOMPurify.sanitize(marked.parse(text || ''));
+      const safe = (text || '').replace(/(\d)~(\d)/g, '$1\\~$2');
+      html = DOMPurify.sanitize(marked.parse(safe));
     } else {
       html = esc(text).replace(/\n/g, '<br>');
     }
@@ -459,6 +919,29 @@
   }
 
   /* ================= 工具 ================= */
+  /* 左栏折叠 + 棱彩星可拖动开关（GSAP Draggable，限定屏幕内） */
+  const navToggleBtn = document.getElementById('navToggle');
+  if (navToggleBtn) {
+    navToggleBtn.addEventListener('click', function () {
+      document.querySelector('.app').classList.toggle('nav-collapsed');
+    });
+  }
+  const gemFab = document.getElementById('gemToggle');
+  if (gemFab && window.gsap && window.Draggable) {
+    gsap.registerPlugin(Draggable);
+    let drawerHidden = false;
+    Draggable.create(gemFab, {
+      type: 'x,y',
+      bounds: document.body,
+      edgeResistance: .75,
+      onClick: function () {
+        drawerHidden = !drawerHidden;
+        document.querySelector('.app').classList.toggle('drawer-hidden', drawerHidden);
+        gemFab.classList.toggle('hidden-state', drawerHidden);
+      },
+    });
+  }
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

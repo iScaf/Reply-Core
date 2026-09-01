@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
         review,
         search,
         stats,
+        users,
     )
 
     app.include_router(auth.router, prefix="/api", tags=["auth"])
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(review.router, prefix="/api", tags=["review"])
     app.include_router(search.router, prefix="/api", tags=["search"])
     app.include_router(chat.router, prefix="/api", tags=["chat"])
+    app.include_router(users.router, prefix="/api", tags=["users"])
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

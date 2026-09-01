@@ -29,11 +29,21 @@ _SOURCES: Dict[str, Dict[str, str]] = {
         "schema": "tutorials",
         "chunk_table": "knowledge_chunks",
         "doc_table": "tutorial_documents",
+        "text_col": "chunk_text",
     },
     "community_settings": {
         "schema": "community_settings",
         "chunk_table": "chunks",
         "doc_table": "documents",
+        "text_col": "chunk_text",
+    },
+    # 用户聊天：对话记忆块（无父文档表，title 由 discord_id 生成）
+    "user_chat": {
+        "schema": "conversation",
+        "chunk_table": "conversation_blocks",
+        "doc_table": None,
+        "text_col": "conversation_text",
+        "id_col": "discord_id",
     },
 }
 
@@ -58,6 +68,28 @@ ORDER BY bm25_score DESC
 LIMIT :k
 """
 
+# 用户聊天专用 SQL（无父文档表可 JOIN）
+_USER_SEMANTIC_SQL = """
+SELECT c.id AS chunk_id, c.id AS document_id,
+       ('用户 ' || c.discord_id) AS title,
+       c.conversation_text AS chunk_text,
+       (c.{col} <=> :qv) AS vec_distance
+FROM conversation.conversation_blocks c
+ORDER BY c.{col} <=> :qv
+LIMIT :k
+"""
+
+_USER_KEYWORD_SQL = """
+SELECT c.id AS chunk_id, c.id AS document_id,
+       ('用户 ' || c.discord_id) AS title,
+       c.conversation_text AS chunk_text,
+       paradedb.score(c.id) AS bm25_score
+FROM conversation.conversation_blocks c
+WHERE c.conversation_text @@@ :q
+ORDER BY bm25_score DESC
+LIMIT :k
+"""
+
 
 def _clean_fts_query(query: str) -> str:
     """清理 BM25 查询文本：仅保留字母、数字、中日韩字符和空格。"""
@@ -78,9 +110,12 @@ class WebSearchService:
         rrf_k = COMMUNITY_SETTINGS_RAG_CONFIG.get("RRF_K", 60)
         per_channel_k = max(top_k, 10)
 
-        sources = (
-            list(_SOURCES.keys()) if scope == "all" else [scope]
-        )
+        if scope == "all":
+            sources = ["tutorials", "community_settings"]  # 全库检索不含用户聊天（隐私隔离）
+        elif scope == "user_chat":
+            sources = ["user_chat"]
+        else:
+            sources = [scope]
         semantic_ok = await self._try_semantic(query)
         keyword_ok = True
 
@@ -88,6 +123,14 @@ class WebSearchService:
         # 每个通道查询独立使用 session：单条失败不会毒化同事务中的后续查询
         for source in sources:
             cfg = _SOURCES[source]
+            if cfg.get("doc_table") is None:
+                # 用户聊天：无父文档表，走专用 SQL
+                if semantic_ok:
+                    rows = await self._run_user_semantic(query, per_channel_k)
+                    self._fuse(merged, source, rows, "semantic", rrf_k)
+                kw_rows = await self._run_user_keyword(query, per_channel_k)
+                self._fuse(merged, source, kw_rows, "keyword", rrf_k)
+                continue
             if semantic_ok:
                 rows = await self._run_semantic(cfg, query, per_channel_k)
                 self._fuse(merged, source, rows, "semantic", rrf_k)
@@ -157,6 +200,40 @@ class WebSearchService:
             log.error(f"[Web 检索] 语义通道查询失败: {e}", exc_info=True)
             return []
 
+    async def _run_user_semantic(
+        self, query: str, k: int
+    ) -> List[Dict[str, Any]]:
+        """用户聊天语义通道（对话记忆块，无父表 JOIN）"""
+        try:
+            service = await get_embedding_service()
+            vector = await service.generate_embedding(
+                text=query, task_type="retrieval_query"
+            )
+            col = await self._embedding_column()
+            sql = text(_USER_SEMANTIC_SQL.format(col=col))
+            async with AsyncSessionLocal() as session:
+                rows = await session.execute(sql, {"qv": str(vector), "k": k})
+                return [dict(r._mapping) for r in rows.fetchall()]
+        except Exception as e:
+            log.error(f"[Web 检索] 用户聊天语义通道失败: {e}", exc_info=True)
+            return []
+
+    async def _run_user_keyword(
+        self, query: str, k: int
+    ) -> List[Dict[str, Any]]:
+        """用户聊天关键词通道"""
+        try:
+            cleaned = _clean_fts_query(query)
+            if not cleaned:
+                return []
+            sql = text(_USER_KEYWORD_SQL)
+            async with AsyncSessionLocal() as session:
+                rows = await session.execute(sql, {"q": cleaned, "k": k})
+                return [dict(r._mapping) for r in rows.fetchall()]
+        except Exception as e:
+            log.error(f"[Web 检索] 用户聊天关键词通道失败: {e}", exc_info=True)
+            return []
+
     async def _run_keyword(
         self, cfg: Dict[str, str], query: str, k: int
     ) -> List[Dict[str, Any]]:
@@ -188,7 +265,8 @@ class WebSearchService:
     ) -> None:
         """把单通道结果按名次并入融合表（rrf = Σ 1/(rrf_k + rank)）"""
         for rank, row in enumerate(rows, start=1):
-            key = int(row["chunk_id"])
+            # 不同来源的 chunk id 可能撞号，key 加来源前缀隔离
+            key = f"{source}:{row['chunk_id']}"
             entry = merged.get(key)
             if entry is None:
                 entry = {
