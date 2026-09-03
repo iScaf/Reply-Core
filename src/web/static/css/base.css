@@ -36,6 +36,13 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 /* 主题切换的平滑过渡（reduced-motion 下已全局禁用） */
 * { transition: background-color .25s ease, border-color .25s ease, color .25s ease; }
+/* 主题切换瞬间：theme.js 挂载 theme-anim 类，强制全站颜色统一渐变；
+   覆盖 nav/aside 等自带 transition（仅 width/transform）导致颜色突变的选择器，
+   完成后移除，不干扰日常 hover/折叠等交互动画 */
+html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
+  transition: background-color .5s ease, border-color .5s ease, color .5s ease,
+    fill .5s ease, stroke .5s ease, box-shadow .5s ease, outline-color .5s ease !important;
+}
 body {
   background: var(--bg);
   color: var(--text);

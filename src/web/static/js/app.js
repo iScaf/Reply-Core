@@ -62,6 +62,7 @@
         entered = true;
         showView('search');
         loadOlderHistory(true);  // 进入控制台时加载最近 5 轮历史
+        loadChatModels();        // 加载问答可选模型列表（后端持久化缓存）
       } else {
         showView(document.querySelector('.nav-item.active').dataset.view);
       }
@@ -331,6 +332,7 @@
       $('umNotes').innerHTML = u.memory_notes.map(function (n) {
         return '<div class="chunk"><span class="idx">' + esc(n.category) + '</span>' + esc(n.content) + '</div>';
       }).join('') || '<div class="table-empty">暂无记忆笔记</div>';
+      renderUserPending(u.pending_history || []);
       renderUserBlocks(u.recent_blocks || []);
       $('userModal').classList.remove('hidden');
     } catch (e) {
@@ -341,8 +343,17 @@
     $('umBlocks').innerHTML = blocks.map(function (b) {
       return '<div class="chunk"><span class="idx">#' + b.id + ' · '
         + (b.message_count || 0) + ' 条 · ' + (b.start_time ? b.start_time.slice(0, 10) : '')
-        + '</span>' + esc(b.conversation_text) + '</div>';
+        + '</span><div class="md-body">' + mdRender(b.conversation_text, []) + '</div></div>';
     }).join('') || '<div class="table-empty">暂无对话记录</div>';
+  }
+  /* 未打包对话（member_profiles.history）：尚未凑满 block_size 的近期轮次 */
+  function renderUserPending(turns) {
+    $('umPending').innerHTML = turns.map(function (t) {
+      const time = t.timestamp ? ' · ' + fmtTime(t.timestamp) : '';
+      return '<div class="chunk"><span class="idx">'
+        + (t.role === 'user' ? '用户' : '秒回喵') + time
+        + '</span><div class="md-body">' + mdRender(t.content, []) + '</div></div>';
+    }).join('') || '<div class="table-empty">暂无未打包对话（近期聊天已全部归档为对话块）</div>';
   }
   $('umChatQuery').addEventListener('keydown', async function (e) {
     if (e.key !== 'Enter' || !currentUser) return;
@@ -604,6 +615,30 @@
 
   $('chatSend').addEventListener('click', sendChat);
   $('chatInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChat(); });
+
+  /* ---------- 模型选择：列表来自后端持久化缓存，选择记住在 localStorage ---------- */
+  const CHAT_MODEL_KEY = 'rc-chat-model';
+  async function loadChatModels() {
+    const sel = $('chatModel');
+    try {
+      const data = await api('/api/chat/models');
+      const saved = (() => { try { return localStorage.getItem(CHAT_MODEL_KEY); } catch (e) { return null; } })();
+      sel.innerHTML = data.models.map(function (m) {
+        return '<option value="' + esc(m) + '">' + esc(m) + '</option>';
+      }).join('');
+      if (saved && data.models.indexOf(saved) >= 0) {
+        sel.value = saved;                       // 恢复上次选择
+      } else {
+        sel.value = data.default;                // 无有效记忆则用默认模型
+        if (saved) { try { localStorage.removeItem(CHAT_MODEL_KEY); } catch (e) {} }
+      }
+    } catch (e) {
+      sel.innerHTML = '<option value="">默认</option>';
+    }
+  }
+  $('chatModel').addEventListener('change', function () {
+    try { localStorage.setItem(CHAT_MODEL_KEY, this.value); } catch (e) {}
+  });
   /* ================= DeepSeek 风格流式渲染 ================= */
   // 思维链折叠区块：流式展开滚动；正文/下一轮开始时折叠为"已深度思考（用时）"
   function createThinkBlock(bubble) {
@@ -655,7 +690,8 @@
       + '<div class="tool-args">' + esc(argsJson) + '</div>'
       + '<div class="tool-status">执行中…</div>'
       + '</div>';
-    line.addEventListener('click', function () {
+    // 仅点击标题行切换折叠/展开，详情区域（参数/结果）可正常选中复制
+    line.querySelector('.tool-head').addEventListener('click', function () {
       if (line.classList.contains('running')) return; // 执行中不可折叠
       line.classList.toggle('collapsed');
     });
@@ -810,6 +846,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text, scope: $('chatScope').value, history: chatHistory.slice(-6),
+          model: $('chatModel').value || undefined,
         }),
       });
       if (!resp.ok || !resp.body) {
@@ -842,7 +879,6 @@
       // 定稿：完整 markdown 重渲染 + 收尾信息
       bubble.classList.remove('streaming');  // 移除流式光标
       collapseThinking(bubble);
-      if (finalData && finalData.model) $('chatModelTag').textContent = 'model: ' + finalData.model;
       if (finalData && finalData.degraded) {
         const note = document.createElement('div');
         note.className = 'degrade-note';
@@ -940,6 +976,45 @@
         gemFab.classList.toggle('hidden-state', drawerHidden);
       },
     });
+  }
+
+  /* 问答抽屉左缘拖拽调宽：宽度存 CSS 变量并持久化到 localStorage */
+  const ASIDE_W_KEY = 'rc-aside-w';
+  const appEl = document.querySelector('.app');
+  const resizer = document.getElementById('asideResizer');
+  (function restoreAsideWidth() {
+    let saved;
+    try { saved = Number(localStorage.getItem(ASIDE_W_KEY)); } catch (e) { saved = 0; }
+    if (saved >= 320 && saved <= 760) appEl.style.setProperty('--aside-w', saved + 'px');
+  })();
+  if (resizer) {
+    let startX = 0, startW = 0, curW = 0;
+    const clampW = function (w) {
+      return Math.round(Math.min(Math.max(w, 320), Math.min(760, window.innerWidth - 520)));
+    };
+    resizer.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      try { resizer.setPointerCapture(e.pointerId); } catch (err) { /* 合成事件无活跃指针 */ }
+      resizer.classList.add('dragging');
+      document.querySelector('aside').classList.add('resizing'); // 拖拽中关闭宽度动画
+      startX = e.clientX;
+      startW = document.querySelector('aside').getBoundingClientRect().width;
+      curW = startW;
+    });
+    resizer.addEventListener('pointermove', function (e) {
+      if (!resizer.classList.contains('dragging')) return;
+      curW = clampW(startW + (startX - e.clientX)); // 抽屉在右侧：左拖增宽
+      appEl.style.setProperty('--aside-w', curW + 'px');
+    });
+    const finishDrag = function () {
+      if (!resizer.classList.contains('dragging')) return;
+      resizer.classList.remove('dragging');
+      document.querySelector('aside').classList.remove('resizing');
+      // 存拖拽目标值而非实时 rect：松手时宽度过渡动画可能尚未结束
+      try { localStorage.setItem(ASIDE_W_KEY, curW); } catch (err) {}
+    };
+    resizer.addEventListener('pointerup', finishDrag);
+    resizer.addEventListener('pointercancel', finishDrag);
   }
 
   function esc(s) {

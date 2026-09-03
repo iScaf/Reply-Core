@@ -62,7 +62,7 @@ class UsersService:
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     async def get_user(self, profile_id: int) -> Optional[Dict[str, Any]]:
-        """用户详情：档案 + 记忆笔记 + 最近对话块。"""
+        """用户详情：档案 + 记忆笔记 + 未打包对话 + 最近对话块。"""
         async with AsyncSessionLocal() as session:
             profile = (
                 await session.execute(
@@ -105,6 +105,8 @@ class UsersService:
             "personal_summary": profile.personal_summary,
             "personal_message_count": profile.personal_message_count,
             "created_at": profile.created_at.isoformat() if profile.created_at else None,
+            # 未打包对话（member_profiles.history）：尚未凑满 block_size 的近期轮次
+            "pending_history": self._format_pending_history(profile.history),
             "memory_notes": [
                 {
                     "category": n.category,
@@ -125,6 +127,33 @@ class UsersService:
                 for b in blocks
             ],
         }
+
+    @staticmethod
+    def _format_pending_history(history: Any) -> List[Dict[str, Any]]:
+        """把 member_profiles.history（未打包对话 JSON）整理为前端展示结构。
+
+        每条形如 {role: user/model, parts: [text], timestamp: iso}；
+        旧数据中的 naive 时间戳按 UTC 兜底（与 Discord 端约定一致）。
+        """
+        items: List[Dict[str, Any]] = []
+        for turn in list(history or [])[-50:]:  # 兜底截尾，正常远小于 50 条
+            if not isinstance(turn, dict):
+                continue
+            parts = turn.get("parts") or []
+            text = "\n".join(str(p) for p in parts).strip()
+            if not text:
+                continue
+            ts = turn.get("timestamp")
+            if isinstance(ts, str) and ts and ("+" not in ts[-6:] and not ts.endswith("Z")):
+                ts += "Z"
+            items.append(
+                {
+                    "role": "bot" if turn.get("role") == "model" else "user",
+                    "content": text,
+                    "timestamp": ts,
+                }
+            )
+        return items
 
     async def search_user_chats(
         self, profile_id: int, q: str, limit: int = 20

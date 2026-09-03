@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>秒回喵 // 检索观测台</title>
-<link rel="stylesheet" href="/static/css/base.css?v=20260901i">
-<link rel="stylesheet" href="/static/css/theme-warm.css?v=20260901i">
-<link rel="stylesheet" href="/static/css/console.css?v=20260901i">
+<link rel="stylesheet" href="/static/css/base.css?v=20260902f">
+<link rel="stylesheet" href="/static/css/theme-warm.css?v=20260902f">
+<link rel="stylesheet" href="/static/css/console.css?v=20260902f">
 <script>
   /* 防闪烁：在样式渲染前先恢复上次选择的主题 */
   try { if (localStorage.getItem('rc-theme') === 'warm') document.documentElement.dataset.theme = 'warm'; } catch (e) {}
@@ -191,6 +191,8 @@
           <input id="umChatQuery" placeholder="在该用户的对话记录中搜索…（回车执行）">
         </div>
         <div id="umChats"></div>
+        <h4>未打包对话 · member_profiles.history</h4>
+        <div id="umPending"></div>
         <h4>最近对话块</h4>
         <div id="umBlocks"></div>
       </div>
@@ -200,6 +202,7 @@
 
   <!-- 问答演示抽屉 -->
   <aside>
+    <div class="aside-resizer" id="asideResizer" title="拖动调整抽屉宽度"></div>
     <div class="aside-head">问答演示 <span id="chatModelTag">tools: on</span></div>
     <div class="chat" id="chatMsgs"></div>
     <div class="chat-scope">
@@ -210,6 +213,10 @@
         <option value="community_settings">仅设定</option>
         <option value="user_chat">用户聊天</option>
       </select>
+      <span class="chat-model-box">
+        模型
+        <select id="chatModel" title="问答使用的模型"><option value="">默认</option></select>
+      </span>
     </div>
     <div class="chat-input">
       <input id="chatInput" placeholder="以管理员身份提问，测试检索问答…">
@@ -267,8 +274,8 @@
 <script src="/static/js/vendor/Draggable.min.js"></script>
 <script src="/static/js/vendor/marked.min.js"></script>
 <script src="/static/js/vendor/purify.min.js"></script>
-<script src="/static/js/theme.js?v=20260901i"></script>
-<script src="/static/js/api.js?v=20260901i"></script>
-<script src="/static/js/app.js?v=20260901i"></script>
+<script src="/static/js/theme.js?v=20260902f"></script>
+<script src="/static/js/api.js?v=20260902f"></script>
+<script src="/static/js/app.js?v=20260902f"></script>
 </body>
 </html>

@@ -111,6 +111,25 @@ class OpenAICompatibleProvider(BaseProvider):
         """检查服务是否可用"""
         return bool(self.api_key) and bool(self.base_url)
 
+    async def list_models(self) -> List[str]:
+        """拉取端点当前开放的模型列表（OpenAI 兼容 GET /models）。
+
+        供 Web 控制台模型选择器使用：调用方负责持久化，避免每次实时查询。
+        """
+        try:
+            client = self._get_client()
+            resp = await client.get("/models")
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+            return sorted(
+                str(m["id"])
+                for m in data
+                if isinstance(m, dict) and m.get("id")
+            )
+        except Exception as e:
+            log.error(f"拉取模型列表失败 ({self.provider_name}): {e}")
+            return []
+
     async def generate(
         self,
         messages: List[Dict[str, Any]],

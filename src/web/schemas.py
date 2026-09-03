@@ -28,6 +28,8 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     history: List[ChatHistoryItem] = Field(default_factory=list, max_length=20)
     scope: Literal["tutorials", "community_settings", "user_chat", "all"] = "all"
+    model: Optional[str] = Field(default=None, max_length=200,
+                                 description="管理员指定的模型；None 回退默认")
 
 
 class SearchResultItem(BaseModel):

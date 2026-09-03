@@ -18,6 +18,7 @@ async def chat(body: ChatRequest):
         message=body.message,
         history=[h.model_dump() for h in body.history],
         scope=body.scope,
+        model=body.model,
     )
 
 
@@ -30,6 +31,14 @@ async def chat_history(
     return await web_chat_service.get_history(page=page, rounds=rounds)
 
 
+@router.get("/chat/models")
+async def chat_models(
+    refresh: bool = Query(False, description="强制实时拉取并刷新持久化缓存"),
+):
+    """问答演示可选模型列表（持久化缓存，首次或 refresh 时实时拉取 Provider）。"""
+    return await web_chat_service.get_model_options(force_refresh=refresh)
+
+
 @router.post("/chat/stream")
 async def chat_stream(body: ChatRequest):
     """流式问答（SSE）：思维链 / 工具调用 / 正文增量分段推送。"""
@@ -40,6 +49,7 @@ async def chat_stream(body: ChatRequest):
                 message=body.message,
                 history=[h.model_dump() for h in body.history],
                 scope=body.scope,
+                model=body.model,
             ):
                 # default=str：工具执行会把嵌套参数模型（如 SearchParams）实例化
                 # 回填进 arguments，序列化时统一转字符串表示
