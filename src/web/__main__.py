@@ -8,7 +8,7 @@ import uvicorn
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    host = os.getenv("WEB_ADMIN_HOST", "127.0.0.1")
+    host = os.getenv("WEB_ADMIN_HOST", "0.0.0.0")
     port = int(os.getenv("WEB_ADMIN_PORT", "8000"))
     uvicorn.run(
         "src.web.app:create_app",
