@@ -100,6 +100,16 @@ class WebChatService:
             self_intro=BOT_SELF_INTRODUCTION,
         ) + KNOWLEDGE_BLOCK.format(materials=materials)
 
+        # 启用的 prompt 注入型技能（如 sql-query 速查表）拼入 system 尾部
+        try:
+            from src.web.services.skill_service import skill_service
+
+            skill_block = skill_service.build_prompt_block()
+            if skill_block:
+                system += "\n\n" + skill_block
+        except Exception as e:
+            log.warning(f"[Web 问答] 技能注入失败（跳过）: {e}")
+
         messages: List[Dict[str, Any]] = [{"role": "system", "content": system}]
         for item in history or []:
             messages.append({"role": item["role"], "content": item["content"]})
@@ -282,10 +292,13 @@ class WebChatService:
         history: Optional[List[Dict[str, str]]] = None,
         scope: str = "all",
         model: Optional[str] = None,
+        persona: Optional[str] = None,
     ) -> AsyncGenerator[tuple, None]:
         """流式问答：先推预检索引用，再逐段推思维链 / 工具 / 正文增量。
 
         model: 管理员在 Web 选择器中指定的模型；None/未知时回退默认模型。
+        persona: 管理员选择的人设（bot_persona.name，如 default/gentle/frank）；
+                 提供时以其正文替换默认人设开场，工具规则段保留。
 
         事件协议（与前端约定）：
           citations    预检索资料（正文渲染引用徽章用）
@@ -324,6 +337,39 @@ class WebChatService:
             community_name=COMMUNITY_NAME,
             self_intro=BOT_SELF_INTRODUCTION,
         ) + KNOWLEDGE_BLOCK.format(materials=materials)
+
+        # 启用的 prompt 注入型技能（如 sql-query 速查表）拼入 system 尾部
+        try:
+            from src.web.services.skill_service import skill_service
+
+            skill_block = skill_service.build_prompt_block()
+            if skill_block:
+                system += "\n\n" + skill_block
+        except Exception as e:
+            log.warning(f"[Web 问答] 技能注入失败（跳过）: {e}")
+
+        # 人设选择：选中的人设正文替换默认人设开场，回答规则段（工具引导）保留
+        if persona:
+            try:
+                from src.chat.services.persona_service import persona_service
+
+                items = await persona_service.get_all()
+                match = next(
+                    (
+                        p
+                        for p in items
+                        if p["name"] == persona and p.get("enabled", True)
+                    ),
+                    None,
+                )
+                if match and "回答规则：" in system:
+                    system = (
+                        match["system_prompt"]
+                        + "\n\n"
+                        + system[system.index("回答规则："):]
+                    )
+            except Exception as e:
+                log.warning(f"[Web 问答] 人设注入失败（使用默认人设）: {e}")
 
         messages: List[Dict[str, Any]] = [{"role": "system", "content": system}]
         for item in history or []:
@@ -386,6 +432,7 @@ class WebChatService:
         config = GenerationConfig(temperature=0.7, max_output_tokens=2000)
         conversation = list(messages)
         content_buf = ""
+        reasoning_buf = ""
         model_used = None
         prompt_tokens = 0
         completion_tokens = 0
@@ -394,12 +441,14 @@ class WebChatService:
             for round_no in range(1, TOOL_ITERATIONS + 1):
                 yield ("round_start", {"round": round_no})
                 round_tool_calls = None
+                round_reasoning = ""
 
                 async for ev in provider.stream_chat(
                     conversation, config=config, tools=tools, model=model_name
                 ):
                     ev_type = ev["type"]
                     if ev_type == "reasoning":
+                        round_reasoning += ev["delta"]
                         yield ("reasoning", {**ev, "round": round_no})
                     elif ev_type == "content":
                         content_buf += ev["delta"]
@@ -414,6 +463,14 @@ class WebChatService:
                         break
                     elif ev_type == "finish":
                         break
+
+                # 思维链持久化：多轮以空行分隔拼接（历史展示与现场一致）
+                if round_reasoning.strip():
+                    reasoning_buf += (
+                        ("\n\n" if reasoning_buf.strip() else "")
+                        + f"[第 {round_no} 轮]\n"
+                        + round_reasoning.strip()
+                    )
 
                 if not round_tool_calls:
                     break  # 正文已流式输出完毕
@@ -514,6 +571,8 @@ class WebChatService:
                     tool_trace.append(
                         {
                             "name": name,
+                            "display": display,
+                            "description": description,
                             "arguments": args,
                             "summary": summary,
                             "elapsed_ms": elapsed,
@@ -532,6 +591,7 @@ class WebChatService:
                         {
                             "name": name,
                             "display": display,
+                            "description": description,
                             "summary": summary,
                             "elapsed_ms": elapsed,
                         },
@@ -555,6 +615,7 @@ class WebChatService:
             model_used = model_name or getattr(provider, "default_model", None)
             final_payload = {
                 "reply": reply,
+                "reasoning": reasoning_buf.strip() or None,
                 "model": model_used,
                 "citations": citations,
                 "tool_trace": tool_trace,
@@ -572,6 +633,7 @@ class WebChatService:
             if partial:
                 payload = {
                     "reply": partial,
+                    "reasoning": reasoning_buf.strip() or None,
                     "model": getattr(provider, "default_model", None),
                     "citations": citations,
                     "tool_trace": tool_trace,
@@ -592,6 +654,7 @@ class WebChatService:
                 # 已有部分正文：收尾并注明截断
                 final_payload = {
                     "reply": content_buf.strip(),
+                    "reasoning": reasoning_buf.strip() or None,
                     "model": getattr(provider, "default_model", None),
                     "citations": citations,
                     "tool_trace": tool_trace,
@@ -639,6 +702,7 @@ class WebChatService:
                     WebChatMessage(
                         role="assistant",
                         content=reply,
+                        reasoning=payload.get("reasoning"),
                         tool_trace=tool_trace,
                         model=payload.get("model"),
                         elapsed_ms=payload.get("elapsed_ms"),
@@ -684,6 +748,7 @@ class WebChatService:
             {
                 "role": r.role,
                 "content": r.content,
+                "reasoning": r.reasoning,
                 "tool_trace": r.tool_trace or [],
                 "model": r.model,
                 "elapsed_ms": r.elapsed_ms,

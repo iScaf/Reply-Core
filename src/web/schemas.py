@@ -30,6 +30,8 @@ class ChatRequest(BaseModel):
     scope: Literal["tutorials", "community_settings", "user_chat", "all"] = "all"
     model: Optional[str] = Field(default=None, max_length=200,
                                  description="管理员指定的模型；None 回退默认")
+    persona: Optional[str] = Field(default=None, max_length=50,
+                                   description="回答使用的人设（bot_persona.name）；None 回退默认人设")
 
 
 class SearchResultItem(BaseModel):

@@ -29,6 +29,7 @@
     'docs-settings': function () { docViews.settings.refresh(); },
     'review': loadReview,
     'users': function () { usersView.refresh(); },
+    'skills': function () { skillsView.enter(); },
   };
   function showView(name) {
     document.querySelectorAll('.nav-item').forEach(function (n) {
@@ -63,6 +64,7 @@
         showView('search');
         loadOlderHistory(true);  // 进入控制台时加载最近 5 轮历史
         loadChatModels();        // 加载问答可选模型列表（后端持久化缓存）
+        loadChatPersonas();      // 加载人设选择（后台「技能与人设」维护）
       } else {
         showView(document.querySelector('.nav-item.active').dataset.view);
       }
@@ -375,6 +377,181 @@
     if (e.target === this) this.classList.add('hidden');
   });
 
+  /* ================= 技能与人设视图 ================= */
+  const skillsView = {
+    entered: false,
+    currentSkill: null,   // 当前编辑的技能名（null = 新建）
+    currentPersona: null, // 当前编辑的人设名
+    enter: function () {
+      if (!this.entered) { this.entered = true; this.loadSkills(); this.loadPersonas(); }
+    },
+    loadSkills: async function () {
+      const list = $('skillList');
+      list.innerHTML = '<div class="dim2" style="padding:8px;">加载中…</div>';
+      try {
+        const data = await api('/api/skills');
+        list.innerHTML = data.items.map(function (s) {
+          return '<div class="sk-item" data-name="' + esc(s.name) + '">'
+            + '<b>' + esc(s.display_name || s.name) + '</b>'
+            + '<span class="sk-item-badges">'
+            + (s.enabled ? '' : '<span class="dim2">[已禁用]</span>')
+            + '<span class="dim2">' + esc(s.injection_mode) + '</span></span></div>';
+        }).join('');
+        list.querySelectorAll('.sk-item').forEach(function (el) {
+          el.addEventListener('click', function () {
+            list.querySelectorAll('.sk-item').forEach(function (x) { x.classList.remove('active'); });
+            el.classList.add('active');
+            skillsView.openSkill(el.dataset.name);
+          });
+        });
+      } catch (e) {
+        list.innerHTML = '<div class="dim2" style="padding:8px;">加载失败: ' + esc(e.message) + '</div>';
+      }
+    },
+    openSkill: async function (name) {
+      skillsView.currentSkill = name;
+      try {
+        const s = await api('/api/skills/' + name);
+        $('skillNameInput').value = s.name;
+        $('skillNameInput').readOnly = true;
+        $('skillDisplayInput').value = s.display_name || '';
+        $('skillDescInput').value = s.description || '';
+        $('skillModeSelect').value = s.injection_mode || 'prompt';
+        $('skillEnabledCheck').checked = !!s.enabled;
+        $('skillContentInput').value = s.content || '';
+        skillsView.setPreview(true);  // 默认预览展示（md 渲染）
+      } catch (e) { alert('读取技能失败: ' + e.message); }
+    },
+    loadPersonas: async function () {
+      const list = $('personaList');
+      list.innerHTML = '<div class="dim2" style="padding:8px;">加载中…</div>';
+      try {
+        const data = await api('/api/persona');
+        list.innerHTML = data.items.map(function (p) {
+          return '<div class="sk-item" data-name="' + esc(p.name) + '">'
+            + '<b>' + esc(p.display_name || p.name) + '</b>'
+            + '<span class="sk-item-badges">'
+            + (p.is_default ? '<span class="ok">[默认]</span>' : '')
+            + (p.enabled ? '' : '<span class="dim2">[已禁用]</span>') + '</span></div>';
+        }).join('');
+        list.querySelectorAll('.sk-item').forEach(function (el) {
+          el.addEventListener('click', function () {
+            list.querySelectorAll('.sk-item').forEach(function (x) { x.classList.remove('active'); });
+            el.classList.add('active');
+            skillsView.openPersona(el.dataset.name);
+          });
+        });
+        // 默认选中第一个
+        const first = list.querySelector('.sk-item');
+        if (first) first.click();
+      } catch (e) {
+        list.innerHTML = '<div class="dim2" style="padding:8px;">加载失败: ' + esc(e.message) + '</div>';
+      }
+    },
+    openPersona: async function (name) {
+      skillsView.currentPersona = name;
+      try {
+        const p = await api('/api/persona/' + name);
+        $('personaNameInput').value = p.name;
+        $('personaDisplayInput').value = p.display_name || '';
+        $('personaEnabledCheck').checked = !!p.enabled;
+        $('personaDefaultCheck').checked = !!p.is_default;
+        $('personaContentInput').value = p.system_prompt || '';
+      } catch (e) { alert('读取人设失败: ' + e.message); }
+    },
+  };
+
+  // Tab 切换
+  document.querySelectorAll('.sk-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      document.querySelectorAll('.sk-tab').forEach(function (t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      $('sk-pane-skill').style.display = tab.dataset.tab === 'skill' ? '' : 'none';
+      $('sk-pane-persona').style.display = tab.dataset.tab === 'persona' ? '' : 'none';
+    });
+  });
+
+  // 新建技能（清空编辑器，名称可写，保持编辑态）
+  $('skillNew').addEventListener('click', function () {
+    skillsView.currentSkill = null;
+    ['skillNameInput', 'skillDisplayInput', 'skillDescInput', 'skillContentInput'].forEach(function (id) { $(id).value = ''; });
+    $('skillNameInput').readOnly = false;
+    $('skillModeSelect').value = 'prompt';
+    $('skillEnabledCheck').checked = true;
+    skillsView.setPreview(false);
+    $('skillContentInput').focus();
+  });
+
+  // 编辑/预览切换（Markdown 渲染，复用 marked + DOMPurify）
+  skillsView.setPreview = function (on) {
+    const input = $('skillContentInput');
+    const preview = $('skillPreview');
+    const btn = $('skillPreviewToggle');
+    if (on) {
+      preview.innerHTML = (window.marked && window.DOMPurify)
+        ? DOMPurify.sanitize(marked.parse(input.value || ''))
+        : esc(input.value).replace(/\n/g, '<br>');
+      input.style.display = 'none';
+      preview.style.display = 'block';
+      btn.textContent = '✏ 编辑';
+    } else {
+      preview.style.display = 'none';
+      input.style.display = '';
+      btn.textContent = '👁 预览';
+    }
+  };
+  $('skillPreviewToggle').addEventListener('click', function () {
+    const previewOn = $('skillPreview').style.display === 'block';
+    skillsView.setPreview(!previewOn);
+  });
+
+  // 保存技能
+  $('skillSave').addEventListener('click', async function () {
+    const name = $('skillNameInput').value.trim();
+    const content = $('skillContentInput').value;
+    if (!name) { alert('请填写技能名'); return; }
+    if (!content.trim()) { alert('技能正文不能为空'); return; }
+    try {
+      $('skillSave').disabled = true;
+      await api('/api/skills/' + name, {
+        method: 'PUT',
+        body: {
+          content: content,
+          display_name: $('skillDisplayInput').value.trim() || null,
+          description: $('skillDescInput').value,
+          injection_mode: $('skillModeSelect').value,
+          enabled: $('skillEnabledCheck').checked,
+        },
+      });
+      await skillsView.loadSkills();
+      skillsView.openSkill(name);
+    } catch (e) { alert('保存失败: ' + e.message); }
+    finally { $('skillSave').disabled = false; }
+  });
+
+  // 保存人设
+  $('personaSave').addEventListener('click', async function () {
+    const name = $('personaNameInput').value.trim();
+    const content = $('personaContentInput').value;
+    if (!name) { alert('请先在左侧选择人设'); return; }
+    if (!content.trim()) { alert('人设正文不能为空'); return; }
+    try {
+      $('personaSave').disabled = true;
+      $('personaSave').textContent = '保存并生效…';
+      await api('/api/persona/' + name, {
+        method: 'PUT',
+        body: {
+          system_prompt: content,
+          display_name: $('personaDisplayInput').value.trim() || null,
+          is_default: $('personaDefaultCheck').checked,
+          enabled: $('personaEnabledCheck').checked,
+        },
+      });
+      await skillsView.loadPersonas();
+    } catch (e) { alert('保存失败: ' + e.message); }
+    finally { $('personaSave').disabled = false; $('personaSave').textContent = '保存'; }
+  });
+
   /* ================= 文档详情弹层 ================= */
   const docModalState = { source: null, id: null };
 
@@ -559,29 +736,64 @@
       const older = document.createDocumentFragment();
       data.messages.forEach(function (m) {
         const role = m.role === 'user' ? 'user' : 'bot';
-        const usage = role === 'bot' && (m.prompt_tokens || m.completion_tokens)
-          ? { prompt_tokens: m.prompt_tokens, completion_tokens: m.completion_tokens } : null;
-        let html;
-        if (role === 'bot') {
-          html = mdRender(m.content || '', []);
-          (m.tool_trace || []).forEach(function (t) {
-            html += '<div class="tool-line"><div class="tool-head"><span class="tool-icon">⚙</span> <b>'
-              + esc(t.name) + '</b><span class="tool-head-status done">'
-              + (t.elapsed_ms != null ? t.elapsed_ms + 'ms' : '') + '</span></div></div>';
-          });
-          if (usage) {
-            html += '<div class="usage-line">⏱ ' + (m.elapsed_ms != null ? m.elapsed_ms + 'ms · ' : '')
-              + '📈 ' + (usage.prompt_tokens || 0) + ' in / '
-              + (usage.completion_tokens || 0) + ' out tokens</div>';
-          }
-        } else {
-          html = esc(m.content || '');
+        if (role === 'user') {
+          const div = document.createElement('div');
+          div.className = 'msg user';
+          div.innerHTML = '<div class="who" style="text-align:right">管理员</div>'
+            + '<div class="bubble">' + esc(m.content || '') + '</div>';
+          older.appendChild(div);
+          return;
         }
+        // bot 消息：与现场生成一致的结构（思维链折叠块 + 可展开工具行 + 正文 + usage）
         const div = document.createElement('div');
-        div.className = 'msg ' + role;
-        div.innerHTML = '<div class="who"' + (role === 'user' ? ' style="text-align:right"' : '') + '>'
-          + (role === 'user' ? '管理员' : '秒回喵 · Reply-Core') + '</div>'
-          + '<div class="bubble' + (role === 'bot' ? ' md' : '') + '">' + html + '</div>';
+        div.className = 'msg bot';
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble md';
+        if (m.reasoning) {
+          const secs = m.elapsed_ms != null ? (m.elapsed_ms / 1000).toFixed(1) : '';
+          const tb = document.createElement('div');
+          tb.className = 'think-block collapsed';
+          tb.innerHTML = '<div class="think-head"><span class="think-icon">🤔</span>'
+            + '<span class="think-title">已深度思考' + (secs ? '（用时 ' + secs + ' 秒）' : '')
+            + '</span><span class="think-arrow">▾</span></div><div class="think-body"></div>';
+          tb.querySelector('.think-body').textContent = m.reasoning;
+          tb.querySelector('.think-head').addEventListener('click', function () {
+            tb.classList.toggle('collapsed');
+          });
+          bubble.appendChild(tb);
+        }
+        (m.tool_trace || []).forEach(function (t) {
+          const line = document.createElement('div');
+          line.className = 'tool-line collapsed';
+          const displayName = t.display || t.name;
+          const desc = t.description ? ' — ' + esc(t.description) : '';
+          const argsJson = JSON.stringify(t.arguments || {});
+          line.innerHTML = '<div class="tool-head"><span class="tool-icon">⚙</span> <b>'
+            + esc(displayName) + '</b><span class="tool-head-status done">'
+            + (t.elapsed_ms != null ? t.elapsed_ms + 'ms' : '') + '</span><span class="think-arrow">▾</span></div>'
+            + '<div class="tool-detail"><div class="tool-desc">' + desc + '</div>'
+            + '<div class="tool-args">' + esc(argsJson) + '</div>'
+            + '<div class="tool-status done"><span class="tool-summary" title="'
+            + esc(t.summary || '') + '">' + esc((t.summary || '').slice(0, 60))
+            + ((t.summary || '').length > 60 ? '…' : '') + '</span></div></div>';
+          line.addEventListener('click', function () { line.classList.toggle('collapsed'); });
+          bubble.appendChild(line);
+        });
+        const contentEl = document.createElement('div');
+        contentEl.className = 'md-content';
+        contentEl.innerHTML = mdRender(m.content || '', []);
+        bubble.appendChild(contentEl);
+        if (m.prompt_tokens || m.completion_tokens) {
+          const usage = document.createElement('div');
+          usage.className = 'usage-line';
+          usage.textContent = '⏱ ' + (m.elapsed_ms != null ? m.elapsed_ms + 'ms' : '')
+            + ' · 📈 ' + (m.prompt_tokens || 0) + ' in / ' + (m.completion_tokens || 0) + ' out tokens';
+          bubble.appendChild(usage);
+        }
+        div.appendChild(document.createElement('div'));
+        div.firstChild.className = 'who';
+        div.firstChild.textContent = '秒回喵 · Reply-Core';
+        div.appendChild(bubble);
         older.appendChild(div);
       });
       if (initial) {
@@ -638,6 +850,27 @@
   }
   $('chatModel').addEventListener('change', function () {
     try { localStorage.setItem(CHAT_MODEL_KEY, this.value); } catch (e) {}
+  });
+
+  /* ---------- 人设选择：列表来自 bot_persona（后台「技能与人设」维护） ---------- */
+  async function loadChatPersonas() {
+    const sel = $('chatPersona');
+    if (!sel) return;
+    try {
+      const data = await api('/api/persona');
+      sel.innerHTML = '<option value="">默认</option>'
+        + data.items.filter(function (p) { return p.enabled !== false; }).map(function (p) {
+          return '<option value="' + esc(p.name) + '">' + esc(p.display_name || p.name) + '</option>';
+        }).join('');
+      const saved = (() => { try { return localStorage.getItem('rc-chat-persona'); } catch (e) { return null; } })();
+      const exists = [...sel.options].some(function (o) { return o.value === saved; });
+      sel.value = exists ? saved : '';
+    } catch (e) {
+      sel.innerHTML = '<option value="">默认</option>';
+    }
+  }
+  $('chatPersona').addEventListener('change', function () {
+    try { localStorage.setItem('rc-chat-persona', this.value); } catch (e) {}
   });
   /* ================= DeepSeek 风格流式渲染 ================= */
   // 思维链折叠区块：流式展开滚动；正文/下一轮开始时折叠为"已深度思考（用时）"
@@ -847,6 +1080,7 @@
         body: JSON.stringify({
           message: text, scope: $('chatScope').value, history: chatHistory.slice(-6),
           model: $('chatModel').value || undefined,
+          persona: ($('chatPersona') ? $('chatPersona').value : '') || undefined,
         }),
       });
       if (!resp.ok || !resp.body) {

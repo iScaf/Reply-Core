@@ -423,3 +423,78 @@ select.scope-select option, .chat-scope select option, .modal select option {
   .query-row .query-input { flex:1 1 100%; }
   .query-row .scope-select, .query-row .btn-run { flex:1; }
 }
+
+/* ---------- 技能与人设视图 ---------- */
+.sk-tabs { display:flex; gap:8px; margin-bottom:14px; }
+.sk-tab {
+  background:var(--panel-2); border:1px solid var(--line); border-radius:8px;
+  color:var(--dim); font-size:12px; padding:7px 16px; cursor:pointer; font-family:inherit;
+}
+.sk-tab.active { color:var(--text); border-color:var(--vec); }
+.sk-layout { display:flex; gap:14px; align-items:stretch; }
+.sk-list {
+  width:230px; flex-shrink:0; background:var(--panel-2);
+  border:1px solid var(--line); border-radius:8px; padding:10px;
+}
+.sk-list-head {
+  display:flex; justify-content:space-between; align-items:center;
+  font-size:10px; letter-spacing:1.5px; color:var(--dim); margin-bottom:8px;
+}
+.sk-item {
+  padding:7px 9px; border-radius:5px; cursor:pointer; font-size:12px;
+  border:1px solid transparent; margin-bottom:3px;
+}
+.sk-item:hover { background:var(--panel); }
+.sk-item.active { background:var(--panel); border-color:var(--line); }
+.sk-item.active b { color:var(--rrf); }
+.sk-item-badges { display:flex; gap:5px; margin-left:6px; font-size:10px; }
+.sk-editor { flex:1; display:flex; flex-direction:column; }
+.sk-editor-bar { display:flex; gap:10px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+.sk-editor-bar input, .sk-editor-bar select {
+  background:var(--panel-2); border:1px solid var(--line); border-radius:4px;
+  color:var(--text); font-family:inherit; font-size:12px; padding:6px 10px;
+}
+.sk-editor-bar input:focus, .sk-editor-bar select:focus { border-color:var(--vec); outline:none; }
+#skillContentInput, #personaContentInput {
+  width:100%; box-sizing:border-box; min-height:340px; resize:vertical;
+  background:var(--panel-2); border:1px solid var(--line); border-radius:6px;
+  color:var(--text); font-family:var(--mono); font-size:12px; line-height:1.7;
+  padding:12px; white-space:pre-wrap;
+}
+#skillContentInput:focus, #personaContentInput:focus { border-color:var(--vec); outline:none; }
+#skillDescInput {
+  width:100%; box-sizing:border-box; margin-bottom:8px;
+  background:var(--panel-2); border:1px solid var(--line); border-radius:4px;
+  color:var(--text); font-size:12px; padding:7px 10px;
+}
+#skillDescInput:focus { border-color:var(--vec); outline:none; }
+.sk-hint { font-size:10.5px; color:var(--dim); margin-top:6px; line-height:1.6; }
+.dim2 { color:var(--dim); font-size:10.5px; }
+.user-modal-scroll { max-height:60vh; overflow-y:auto; padding-right:6px; }
+
+/* ---------- 技能预览（Markdown 只读渲染） ---------- */
+.md-preview {
+  min-height:340px; font-size:12.5px; line-height:1.75; color:var(--text);
+  border:1px solid var(--line); border-radius:6px;
+  background:var(--panel-2); padding:14px 16px; overflow-y:auto; max-height:60vh;
+}
+.md-preview h1, .md-preview h2, .md-preview h3, .md-preview h4 { margin:14px 0 6px; line-height:1.35; }
+.md-preview h1 { font-size:16px; } .md-preview h2 { font-size:14.5px; }
+.md-preview h3, .md-preview h4 { font-size:13px; }
+.md-preview p { margin:6px 0; }
+.md-preview ul, .md-preview ol { margin:6px 0; padding-left:20px; }
+.md-preview li { margin:3px 0; }
+.md-preview code {
+  background:var(--panel); border:1px solid var(--line); border-radius:4px;
+  padding:1px 5px; font-family:var(--mono); font-size:11.5px;
+}
+.md-preview pre {
+  background:var(--panel); border:1px solid var(--line); border-radius:6px;
+  padding:10px 12px; overflow-x:auto; margin:8px 0;
+}
+.md-preview pre code { background:none; border:none; padding:0; }
+.md-preview table { border-collapse:collapse; margin:8px 0; font-size:11.5px; width:100%; }
+.md-preview th, .md-preview td { border:1px solid var(--line); padding:5px 8px; text-align:left; }
+.md-preview th { background:var(--panel); }
+.md-preview blockquote { margin:8px 0; padding:2px 12px; color:var(--dim); border-left:3px solid var(--line); }
+.md-preview a { color:var(--vec); }

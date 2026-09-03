@@ -50,6 +50,7 @@ async def chat_stream(body: ChatRequest):
                 history=[h.model_dump() for h in body.history],
                 scope=body.scope,
                 model=body.model,
+                persona=body.persona,
             ):
                 # default=str：工具执行会把嵌套参数模型（如 SearchParams）实例化
                 # 回填进 arguments，序列化时统一转字符串表示
