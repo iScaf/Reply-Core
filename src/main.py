@@ -348,6 +348,14 @@ async def main():
     log.info("初始化 Chat 数据库...")
     await chat_db_manager.init_async()
 
+    # 人设库 seed（表空时从 prompts.py 静态定义写入；后台「技能与人设」可编辑）
+    try:
+        from src.chat.services.persona_service import persona_service
+
+        await persona_service.ensure_seeded()
+    except Exception as e:
+        log.warning(f"人设库 seed 跳过: {e}")
+
     log.info("已加载并注册 AI 工具。")
 
     # 4. 创建并运行机器人实例

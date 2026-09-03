@@ -20,6 +20,13 @@ async def lifespan(app: FastAPI):
     if not token:
         log.warning("WEB_ADMIN_TOKEN 未配置，/api 接口将返回 503（登录不可用）")
     try:
+        # 人设库 seed（表空时从静态定义写入；后台「技能与人设」可编辑）
+        from src.chat.services.persona_service import persona_service
+
+        await persona_service.ensure_seeded()
+    except Exception as e:
+        log.warning(f"人设库 seed 跳过: {e}")
+    try:
         from src.chat.features.tools.services.tool_service import ToolService
         from src.chat.features.tools.tool_loader import load_tools_from_directory
         from src.chat.services.ai.service import ai_service
@@ -52,8 +59,10 @@ def create_app() -> FastAPI:
         auth,
         chat,
         documents,
+        persona,
         review,
         search,
+        skills,
         stats,
         users,
     )
@@ -65,6 +74,8 @@ def create_app() -> FastAPI:
     app.include_router(search.router, prefix="/api", tags=["search"])
     app.include_router(chat.router, prefix="/api", tags=["chat"])
     app.include_router(users.router, prefix="/api", tags=["users"])
+    app.include_router(skills.router, prefix="/api", tags=["skills"])
+    app.include_router(persona.router, prefix="/api", tags=["persona"])
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

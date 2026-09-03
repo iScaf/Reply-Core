@@ -109,9 +109,22 @@ class PromptService:
         self, persona_style: str, model_name: Optional[str]
     ) -> Optional[str]:
         """
-        获取人设风格变体的 SYSTEM_PROMPT。
-        查找顺序: PERSONA_VARIANTS[style][model_name] → PERSONA_VARIANTS[style]["default"] → None
+        获取人设 SYSTEM_PROMPT。
+        查找顺序:
+        1. DB 人设库（ai_config.bot_persona，后台「技能与人设」可编辑，
+           persona_service 内存缓存 30s，编辑保存即刷新生效）
+        2. 静态回退: PERSONA_VARIANTS[style][model_name] → [style]["default"]
+           → PROMPT_CONFIG 默认（由调用方处理）
         """
+        try:
+            from src.chat.services.persona_service import persona_service
+
+            db_prompt = persona_service.get_prompt_for_style(persona_style)
+            if db_prompt:
+                return db_prompt
+        except Exception as e:
+            log.warning(f"读取 DB 人设失败，回退静态定义: {e}")
+
         if persona_style == "default" or persona_style not in PERSONA_VARIANTS:
             return None
 

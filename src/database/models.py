@@ -1093,6 +1093,27 @@ class DailyStat(Base):
         return f"<DailyStat(date='{self.stat_date}')>"
 
 
+class BotPersona(Base):
+    """Bot 人设库（后台可编辑，替代 prompts.py 硬编码的编辑入口）"""
+
+    __tablename__ = "bot_persona"
+    __table_args__ = (
+        Index("ix_bot_persona_name", "name", unique=True),
+        {"schema": AI_CONFIG_SCHEMA},
+    )
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    name = Column(String(50), unique=True, nullable=False, comment="人设唯一标识（default/gentle/自定义，对应 persona_style）")
+    display_name = Column(String(100), nullable=False, comment="后台展示名")
+    system_prompt = Column(Text, nullable=False, comment="完整人设正文（<character> 结构）")
+    is_default = Column(Integer, nullable=False, default=0, comment="1=默认人设（无用户偏好时使用）")
+    enabled = Column(Integer, nullable=False, default=1, comment="1=启用")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    def __repr__(self):
+        return f"<BotPersona(name='{self.name}', is_default={self.is_default})>"
+
+
 class WebChatMessage(Base):
     """Web 问答演示的聊天记录持久化（每行一条 user/assistant 消息）"""
 
@@ -1105,6 +1126,7 @@ class WebChatMessage(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     role = Column(String(20), nullable=False, comment="user / assistant")
     content = Column(Text, nullable=False, comment="消息正文")
+    reasoning = Column(Text, nullable=True, comment="思维链全文（多轮以分隔符拼接；历史展示用）")
     tool_trace = Column(JSON, nullable=True, comment="assistant 消息关联的工具调用轨迹")
     model = Column(String(200), nullable=True, comment="生成使用的模型")
     elapsed_ms = Column(Integer, nullable=True, comment="总耗时（毫秒）")
